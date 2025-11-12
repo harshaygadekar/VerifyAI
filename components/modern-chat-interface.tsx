@@ -2,16 +2,19 @@
 
 import { useRef, useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send, Loader2, User, Bot, Copy, RefreshCw, Check, Sparkles, FileText, Plus, ArrowUp } from 'lucide-react'
+import { Send, Loader2, User, Bot, Copy, Check, Sparkles, FileText, Plus, ArrowUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { SearchResult, NewsResult, ImageResult } from '../app/types'
+import { SearchResult, NewsResult, ImageResult, SourceType } from '../app/types'
 import { type UIMessage } from 'ai'
 import { MarkdownRenderer } from '../app/markdown-renderer'
-import { LoadingAnimation, TypingIndicator, SearchLoadingSteps } from './loading-animation'
+import { TypingIndicator, SearchLoadingSteps } from './loading-animation'
 import { ImageResults } from '../app/image-results'
 import { NewsResults } from '../app/news-results'
-import { ResponseLengthSelector, type ResponseLength } from './response-length-selector'
+import { ExportMenu } from './export-menu'
+import { CitationExport } from './citation-export'
+import { SourceFilter } from './source-filter'
+import { SearchSuggestions } from './search-suggestions'
 import Image from 'next/image'
 
 interface MessageData {
@@ -35,8 +38,9 @@ interface ModernChatInterfaceProps {
   handleSubmit: (e: React.FormEvent<HTMLFormElement>) => void
   messageData?: Map<number, MessageData>
   currentTicker?: string | null
-  responseLength?: ResponseLength
-  onResponseLengthChange?: (length: ResponseLength) => void
+  allSources?: SearchResult[]
+  sourceFilter?: SourceType
+  onSourceFilterChange?: (type: SourceType) => void
 }
 
 // Helper function to extract text content from UIMessage
@@ -60,7 +64,10 @@ export function ModernChatInterface({
   handleInputChange,
   handleSubmit,
   messageData,
-  currentTicker
+  currentTicker,
+  allSources = [],
+  sourceFilter = 'all',
+  onSourceFilterChange
 }: ModernChatInterfaceProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
@@ -68,6 +75,14 @@ export function ModernChatInterface({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [isFocused, setIsFocused] = useState(false)
+
+  const displaySources = allSources.length > 0 ? allSources : sources
+
+  // Extract first user query for export
+  const firstUserMessage = messages.find(m => m.role === 'user')
+  const query = firstUserMessage ? getMessageContent(firstUserMessage) : 'Untitled'
 
   // Auto-resize textarea
   useEffect(() => {
@@ -110,6 +125,7 @@ export function ModernChatInterface({
     if (!input.trim() || isLoading) return
     handleSubmit(e)
     setIsAtBottom(true)
+    setShowSuggestions(false)
   }
 
   const handleFollowUpClick = (question: string) => {
@@ -130,10 +146,21 @@ export function ModernChatInterface({
     }
   }
 
+  const handleInputChangeWithSuggestions = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    handleInputChange(e)
+    setShowSuggestions(isFocused && messages.length === 0)
+  }
+
+  const handleSelectSuggestion = (suggestion: string) => {
+    handleInputChange({ target: { value: suggestion } } as React.ChangeEvent<HTMLTextAreaElement>)
+    setShowSuggestions(false)
+    textareaRef.current?.focus()
+  }
+
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-gray-50/50 to-white dark:from-gray-900/50 dark:to-gray-900">
       {/* Messages Container */}
-      <div 
+      <div
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto px-4 py-6 space-y-6"
         onScroll={handleScroll}
@@ -174,7 +201,7 @@ export function ModernChatInterface({
                     <Bot className="w-5 h-5 text-white" />
                   </div>
                 )}
-                
+
                 <div className={`max-w-3xl ${message.role === 'user' ? 'order-first' : ''}`}>
                   {message.role === 'user' ? (
                     <div className="bg-orange-500 text-white rounded-2xl rounded-br-md px-4 py-3 shadow-lg">
@@ -183,12 +210,12 @@ export function ModernChatInterface({
                   ) : (
                     <div className="bg-white dark:bg-gray-800 rounded-2xl rounded-bl-md p-6 shadow-lg border border-gray-200 dark:border-gray-700">
                       <div className="prose prose-gray max-w-none dark:prose-invert prose-sm">
-                        <MarkdownRenderer 
+                        <MarkdownRenderer
                           content={getMessageContent(message)}
                           sources={sources}
                         />
                       </div>
-                      
+
                       {/* Message Actions */}
                       <div className="flex items-center gap-2 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <Button
@@ -237,6 +264,36 @@ export function ModernChatInterface({
                 ) : (
                   <TypingIndicator />
                 )}
+              </div>
+            </motion.div>
+          )}
+
+          {/* Source Filter & Export Actions */}
+          {sources.length > 0 && !isLoading && (
+            <motion.div
+              className="flex flex-wrap items-center gap-3"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+            >
+              {onSourceFilterChange && (
+                <SourceFilter
+                  sources={displaySources}
+                  selectedType={sourceFilter}
+                  onSelectType={onSourceFilterChange}
+                />
+              )}
+
+              <div className="ml-auto flex gap-2">
+                <CitationExport sources={sources} newsResults={newsResults} />
+                <ExportMenu
+                  messages={messages}
+                  sources={sources}
+                  newsResults={newsResults}
+                  imageResults={imageResults}
+                  query={query}
+                  ticker={currentTicker || undefined}
+                />
               </div>
             </motion.div>
           )}
@@ -382,8 +439,16 @@ export function ModernChatInterface({
               <Textarea
                 ref={textareaRef}
                 value={input}
-                onChange={handleInputChange}
+                onChange={handleInputChangeWithSuggestions}
                 onKeyDown={handleKeyDown}
+                onFocus={() => {
+                  setIsFocused(true)
+                  setShowSuggestions(messages.length === 0)
+                }}
+                onBlur={() => {
+                  setIsFocused(false)
+                  setTimeout(() => setShowSuggestions(false), 200)
+                }}
                 placeholder="Ask me anything..."
                 className="w-full resize-none border-0 bg-transparent px-4 py-4 pr-12 text-gray-900 dark:text-white placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-0 focus:outline-none"
                 rows={1}
@@ -404,6 +469,14 @@ export function ModernChatInterface({
                 </Button>
               </div>
             </div>
+
+            {/* Search Suggestions */}
+            <SearchSuggestions
+              input={input}
+              onSelectSuggestion={handleSelectSuggestion}
+              isVisible={showSuggestions}
+            />
+
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
               Press Enter to send, Shift+Enter for new line
             </p>

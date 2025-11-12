@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Home, MessageSquare, Settings, Menu, X, Sparkles } from 'lucide-react'
+import { Search, Home, MessageSquare, Settings, Menu, X, Sparkles, Clock } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { ThemeToggle } from './theme-toggle'
@@ -12,9 +12,10 @@ interface NavigationProps {
   currentPage?: 'home' | 'chat' | 'settings'
   onNewChat?: () => void
   showNewChatButton?: boolean
+  onShowHistory?: () => void
 }
 
-export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton = false }: NavigationProps) {
+export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton = false, onShowHistory }: NavigationProps) {
   const [isScrolled, setIsScrolled] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
@@ -93,6 +94,24 @@ export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton 
 
             {/* Actions */}
             <div className="flex items-center gap-3">
+              {onShowHistory && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <Button
+                    onClick={onShowHistory}
+                    variant="ghost"
+                    size="sm"
+                    className="hidden sm:flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+                  >
+                    <Clock className="w-4 h-4" />
+                    History
+                  </Button>
+                </motion.div>
+              )}
+
               {showNewChatButton && onNewChat && (
                 <motion.div
                   initial={{ opacity: 0, scale: 0.8 }}
@@ -110,7 +129,7 @@ export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton 
                   </Button>
                 </motion.div>
               )}
-              
+
               <ThemeToggle />
               
               {/* Mobile menu button */}
@@ -179,26 +198,47 @@ export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton 
                   </motion.div>
                 ))}
                 
-                {showNewChatButton && onNewChat && (
-                  <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: navItems.length * 0.1 }}
-                    className="pt-2 border-t border-gray-200 dark:border-gray-700"
-                  >
-                    <Button
-                      onClick={() => {
-                        onNewChat()
-                        setIsMobileMenuOpen(false)
-                      }}
-                      variant="outline"
-                      className="w-full justify-start gap-3 border-orange-200 dark:border-orange-700 hover:border-orange-300 dark:hover:border-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20"
+                <div className="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-2">
+                  {onShowHistory && (
+                    <motion.div
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: navItems.length * 0.1 }}
                     >
-                      <Search className="w-5 h-5" />
-                      New Search
-                    </Button>
-                  </motion.div>
-                )}
+                      <Button
+                        onClick={() => {
+                          onShowHistory()
+                          setIsMobileMenuOpen(false)
+                        }}
+                        variant="ghost"
+                        className="w-full justify-start gap-3 text-gray-700 dark:text-gray-300"
+                      >
+                        <Clock className="w-5 h-5" />
+                        History
+                      </Button>
+                    </motion.div>
+                  )}
+
+                  {showNewChatButton && onNewChat && (
+                    <motion.div
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: (navItems.length + 1) * 0.1 }}
+                    >
+                      <Button
+                        onClick={() => {
+                          onNewChat()
+                          setIsMobileMenuOpen(false)
+                        }}
+                        variant="outline"
+                        className="w-full justify-start gap-3 border-orange-200 dark:border-orange-700 hover:border-orange-300 dark:hover:border-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20"
+                      >
+                        <Search className="w-5 h-5" />
+                        New Search
+                      </Button>
+                    </motion.div>
+                  )}
+                </div>
               </div>
             </motion.div>
           </motion.div>

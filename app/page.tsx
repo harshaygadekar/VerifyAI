@@ -4,7 +4,7 @@ import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import { motion } from 'framer-motion'
 import { SearchComponent } from './search'
-import { SearchResult, NewsResult, ImageResult } from './types'
+import { SearchResult, NewsResult, ImageResult, ChatSession, SourceType } from './types'
 import { Button } from '@/components/ui/button'
 import { useState, useEffect, useRef } from 'react'
 import {
@@ -19,6 +19,9 @@ import { toast } from "sonner"
 import { Navigation } from '@/components/navigation'
 import { ModernChatInterface } from '@/components/modern-chat-interface'
 import { LandingPage } from '@/components/landing-page'
+import { HistorySidebar } from '@/components/history-sidebar'
+import { saveChatSession } from '@/lib/chat-history'
+import { filterSourcesByType } from '@/lib/source-filters'
 
 interface MessageData {
   sources: SearchResult[]
@@ -46,6 +49,10 @@ export default function VerifyAIPage() {
   const [pendingQuery, setPendingQuery] = useState<string>('')
   const [input, setInput] = useState<string>('')
   const [showLanding, setShowLanding] = useState<boolean>(true)
+  const [showHistorySidebar, setShowHistorySidebar] = useState<boolean>(false)
+  const [sourceFilter, setSourceFilter] = useState<SourceType>('all')
+  const [filteredSources, setFilteredSources] = useState<SearchResult[]>([])
+  const currentChatId = useRef<string | null>(null)
 
   const { messages, sendMessage, status } = useChat({
     transport: new DefaultChatTransport({
@@ -153,7 +160,7 @@ export default function VerifyAIPage() {
       try {
         const response = await fetch('/api/fireplexity/check-env')
         const data = await response.json()
-        
+
         if (data.hasFirecrawlKey) {
           setHasApiKey(true)
         } else {
@@ -170,9 +177,39 @@ export default function VerifyAIPage() {
         setIsCheckingEnv(false)
       }
     }
-    
+
     checkApiKey()
   }, [])
+
+  // Filter sources based on selected type
+  useEffect(() => {
+    const filtered = filterSourcesByType(sources, sourceFilter)
+    setFilteredSources(filtered)
+  }, [sources, sourceFilter])
+
+  // Auto-save chat when conversation is complete
+  useEffect(() => {
+    if (
+      status === 'ready' &&
+      messages.length > 0 &&
+      sources.length > 0 &&
+      !currentChatId.current
+    ) {
+      // Save the chat session
+      const firstUserMessage = messages.find(m => m.role === 'user')
+      if (firstUserMessage) {
+        const chatId = saveChatSession(
+          messages,
+          sources,
+          newsResults,
+          imageResults,
+          followUpQuestions,
+          currentTicker || undefined
+        )
+        currentChatId.current = chatId
+      }
+    }
+  }, [status, messages, sources, newsResults, imageResults, followUpQuestions, currentTicker])
 
   const handleApiKeySubmit = () => {
     if (firecrawlApiKey.trim()) {
@@ -256,7 +293,21 @@ export default function VerifyAIPage() {
     setInput('')
     setMessageData(new Map())
     setShowLanding(false)
+    setSourceFilter('all')
+    currentChatId.current = null
     // Reset messages would need to be handled by the chat hook
+  }
+
+  const handleLoadChat = (session: ChatSession) => {
+    // Note: Since we're using the useChat hook, we can't directly set messages
+    // This is a limitation. For now, we'll just show a toast
+    // In a full implementation, you'd need to refactor to allow loading chat history
+    toast.info('Loading chat history...', {
+      description: 'This feature requires page reload. Coming soon!'
+    })
+
+    // Alternative: You could reload the page with the chat data in URL params
+    // or implement a custom message state management
   }
 
   const handleGetStarted = () => {
@@ -270,11 +321,19 @@ export default function VerifyAIPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-gray-900 transition-colors">
+      {/* History Sidebar */}
+      <HistorySidebar
+        isOpen={showHistorySidebar}
+        onClose={() => setShowHistorySidebar(false)}
+        onLoadChat={handleLoadChat}
+      />
+
       {/* Navigation */}
-      <Navigation 
+      <Navigation
         currentPage={isChatActive ? 'chat' : 'home'}
         onNewChat={isChatActive ? handleNewChat : undefined}
         showNewChatButton={isChatActive}
+        onShowHistory={() => setShowHistorySidebar(true)}
       />
 
       {/* Hero section - matching other pages */}
@@ -317,9 +376,9 @@ export default function VerifyAIPage() {
               </div>
             </div>
           ) : (
-            <ModernChatInterface 
+            <ModernChatInterface
               messages={messages}
-              sources={sources}
+              sources={filteredSources.length > 0 ? filteredSources : sources}
               newsResults={newsResults}
               imageResults={imageResults}
               followUpQuestions={followUpQuestions}
@@ -330,6 +389,9 @@ export default function VerifyAIPage() {
               handleSubmit={handleChatSubmit}
               messageData={messageData}
               currentTicker={currentTicker}
+              allSources={sources}
+              sourceFilter={sourceFilter}
+              onSourceFilterChange={setSourceFilter}
             />
           )}
         </div>
