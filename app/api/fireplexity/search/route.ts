@@ -6,10 +6,37 @@ import { detectCompanyTicker } from '@/lib/company-ticker-map'
 import { selectRelevantContent } from '@/lib/content-selection'
 import { saveQuery, saveSearchResults, trackApiUsage } from '@/lib/db/queries'
 import type { QueryInsert, SearchResultInsert, ApiUsageInsert } from '@/lib/db/types'
+import { validateSearchQuery, sanitizeInput } from '@/lib/validations'
+import { rateLimit, getClientIdentifier } from '@/lib/rate-limit'
 
 export async function POST(request: Request) {
   const requestId = Math.random().toString(36).substring(7)
   const startTime = Date.now()
+
+  // Rate limiting
+  const identifier = getClientIdentifier(request)
+  const rateLimitResult = rateLimit(identifier, {
+    windowMs: 60 * 1000, // 1 minute
+    maxRequests: 30, // 30 requests per minute
+  })
+
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json(
+      {
+        error: 'Too many requests. Please try again later.',
+        retryAfter: Math.ceil((rateLimitResult.resetAt - Date.now()) / 1000),
+      },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Limit': rateLimitResult.limit.toString(),
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': rateLimitResult.resetAt.toString(),
+          'Retry-After': Math.ceil((rateLimitResult.resetAt - Date.now()) / 1000).toString(),
+        },
+      }
+    )
+  }
 
   try {
     const body = await request.json()
@@ -34,6 +61,13 @@ export async function POST(request: Request) {
     if (!query) {
       return NextResponse.json({ error: 'Query is required' }, { status: 400 })
     }
+
+    // Validate and sanitize query
+    const validation = validateSearchQuery(query)
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.error }, { status: 400 })
+    }
+    query = validation.sanitized
 
     // Use API key from request body if provided, otherwise fall back to environment variable
     const firecrawlApiKey = body.firecrawlApiKey || process.env.FIRECRAWL_API_KEY

@@ -154,7 +154,7 @@ export function ModernChatInterface({
                 Welcome to VerifyAI
               </h1>
               <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-                Ask me anything and I'll search the web, analyze sources, and provide you with comprehensive answers.
+                Ask me anything and I&apos;ll search the web, analyze sources, and provide you with comprehensive answers.
               </p>
             </motion.div>
           )}

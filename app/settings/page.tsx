@@ -2,64 +2,40 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Settings, Key, Palette, Bell, Shield, Save, Check } from 'lucide-react'
+import { Settings, Key, Shield, Save, Check } from 'lucide-react'
 import { Navigation } from '@/components/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'sonner'
 
 export default function SettingsPage() {
   const [firecrawlApiKey, setFirecrawlApiKey] = useState('')
-  const [groqApiKey, setGroqApiKey] = useState('')
-  const [notifications, setNotifications] = useState(true)
-  const [darkMode, setDarkMode] = useState(false)
-  const [autoSave, setAutoSave] = useState(true)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
     // Load settings from localStorage
     const storedFirecrawlKey = localStorage.getItem('firecrawl-api-key')
-    const storedGroqKey = localStorage.getItem('groq-api-key')
-    const storedNotifications = localStorage.getItem('notifications')
-    const storedAutoSave = localStorage.getItem('auto-save')
-
     if (storedFirecrawlKey) setFirecrawlApiKey(storedFirecrawlKey)
-    if (storedGroqKey) setGroqApiKey(storedGroqKey)
-    if (storedNotifications) setNotifications(JSON.parse(storedNotifications))
-    if (storedAutoSave) setAutoSave(JSON.parse(storedAutoSave))
-
-    // Check system theme
-    setDarkMode(document.documentElement.classList.contains('dark'))
   }, [])
 
   const handleSave = () => {
-    // Save API keys
+    // Save API key
     if (firecrawlApiKey) {
       localStorage.setItem('firecrawl-api-key', firecrawlApiKey)
+      setSaved(true)
+      toast.success('Firecrawl API key saved successfully!')
+      setTimeout(() => setSaved(false), 2000)
+    } else {
+      toast.error('Please enter a valid API key')
     }
-    if (groqApiKey) {
-      localStorage.setItem('groq-api-key', groqApiKey)
-    }
-
-    // Save preferences
-    localStorage.setItem('notifications', JSON.stringify(notifications))
-    localStorage.setItem('auto-save', JSON.stringify(autoSave))
-
-    setSaved(true)
-    toast.success('Settings saved successfully!')
-    
-    setTimeout(() => setSaved(false), 2000)
   }
 
   const handleClearData = () => {
     localStorage.removeItem('firecrawl-api-key')
-    localStorage.removeItem('groq-api-key')
     setFirecrawlApiKey('')
-    setGroqApiKey('')
-    toast.success('API keys cleared!')
+    toast.success('API key cleared!')
   }
 
   return (
@@ -88,15 +64,15 @@ export default function SettingsPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Key className="w-5 h-5 text-orange-500" />
-                    API Keys
+                    API Configuration
                   </CardTitle>
                   <CardDescription>
-                    Configure your API keys for Firecrawl and Groq services.
+                    Configure your Firecrawl API key for custom searches. Server keys are used by default.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <Label htmlFor="firecrawl-key">Firecrawl API Key</Label>
+                    <Label htmlFor="firecrawl-key">Firecrawl API Key (Optional)</Label>
                     <Input
                       id="firecrawl-key"
                       type="password"
@@ -106,37 +82,14 @@ export default function SettingsPage() {
                       className="mt-1"
                     />
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      Get your API key from{' '}
-                      <a 
-                        href="https://www.firecrawl.dev" 
-                        target="_blank" 
+                      Use your own API key to bypass server limits. Get one from{' '}
+                      <a
+                        href="https://www.firecrawl.dev"
+                        target="_blank"
                         rel="noopener noreferrer"
                         className="text-orange-600 dark:text-orange-400 hover:underline"
                       >
                         firecrawl.dev
-                      </a>
-                    </p>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="groq-key">Groq API Key</Label>
-                    <Input
-                      id="groq-key"
-                      type="password"
-                      value={groqApiKey}
-                      onChange={(e) => setGroqApiKey(e.target.value)}
-                      placeholder="gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                      className="mt-1"
-                    />
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      Get your API key from{' '}
-                      <a 
-                        href="https://console.groq.com/keys" 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="text-orange-600 dark:text-orange-400 hover:underline"
-                      >
-                        console.groq.com
                       </a>
                     </p>
                   </div>
@@ -151,56 +104,66 @@ export default function SettingsPage() {
                       ) : (
                         <>
                           <Save className="w-4 h-4" />
-                          Save Keys
+                          Save Key
                         </>
                       )}
                     </Button>
                     <Button variant="outline" onClick={handleClearData}>
-                      Clear All
+                      Clear Key
                     </Button>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Preferences Section */}
+              {/* Database Features Section */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Settings className="w-5 h-5 text-orange-500" />
-                    Preferences
+                    Database Features
                   </CardTitle>
                   <CardDescription>
-                    Customize your VerifyAI experience.
+                    All search queries and results are automatically tracked and saved.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label htmlFor="notifications">Notifications</Label>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Receive notifications about search results and updates
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                      <h4 className="font-semibold text-green-900 dark:text-green-100 mb-1">
+                        Query History
+                      </h4>
+                      <p className="text-sm text-green-700 dark:text-green-300">
+                        All your searches are saved with full metadata and analytics.
                       </p>
                     </div>
-                    <Switch
-                      id="notifications"
-                      checked={notifications}
-                      onCheckedChange={setNotifications}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label htmlFor="auto-save">Auto-save Searches</Label>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Automatically save your search history
+                    <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                      <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-1">
+                        API Usage Tracking
+                      </h4>
+                      <p className="text-sm text-blue-700 dark:text-blue-300">
+                        Monitor Firecrawl and Groq API usage with detailed metrics.
                       </p>
                     </div>
-                    <Switch
-                      id="auto-save"
-                      checked={autoSave}
-                      onCheckedChange={setAutoSave}
-                    />
+                    <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                      <h4 className="font-semibold text-purple-900 dark:text-purple-100 mb-1">
+                        Search Results
+                      </h4>
+                      <p className="text-sm text-purple-700 dark:text-purple-300">
+                        Web, news, and image results preserved with full content.
+                      </p>
+                    </div>
+                    <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                      <h4 className="font-semibold text-orange-900 dark:text-orange-100 mb-1">
+                        Analytics Views
+                      </h4>
+                      <p className="text-sm text-orange-700 dark:text-orange-300">
+                        Popular queries, user stats, and daily analytics available.
+                      </p>
+                    </div>
                   </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-4">
+                    Data is stored securely in Supabase with Row Level Security enabled.
+                  </p>
                 </CardContent>
               </Card>
 
