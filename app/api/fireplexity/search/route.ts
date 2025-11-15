@@ -4,13 +4,45 @@ import { streamText, generateText, createUIMessageStream, createUIMessageStreamR
 import type { ModelMessage } from 'ai'
 import { detectCompanyTicker } from '@/lib/company-ticker-map'
 import { selectRelevantContent } from '@/lib/content-selection'
+import { saveQuery, saveSearchResults, trackApiUsage } from '@/lib/db/queries'
+import type { QueryInsert, SearchResultInsert, ApiUsageInsert } from '@/lib/db/types'
+import { validateSearchQuery, sanitizeInput } from '@/lib/validations'
+import { rateLimit, getClientIdentifier } from '@/lib/rate-limit'
 
 export async function POST(request: Request) {
   const requestId = Math.random().toString(36).substring(7)
+  const startTime = Date.now()
+
+  // Rate limiting
+  const identifier = getClientIdentifier(request)
+  const rateLimitResult = rateLimit(identifier, {
+    windowMs: 60 * 1000, // 1 minute
+    maxRequests: 30, // 30 requests per minute
+  })
+
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json(
+      {
+        error: 'Too many requests. Please try again later.',
+        retryAfter: Math.ceil((rateLimitResult.resetAt - Date.now()) / 1000),
+      },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Limit': rateLimitResult.limit.toString(),
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': rateLimitResult.resetAt.toString(),
+          'Retry-After': Math.ceil((rateLimitResult.resetAt - Date.now()) / 1000).toString(),
+        },
+      }
+    )
+  }
 
   try {
     const body = await request.json()
     const messages = body.messages || []
+    const userId = body.userId || null // Optional user ID from the request
+    const sessionId = body.sessionId || null // Optional session ID from the request
 
     // Extract query from v5 message structure (messages have parts array)
     let query = body.query
@@ -29,6 +61,13 @@ export async function POST(request: Request) {
     if (!query) {
       return NextResponse.json({ error: 'Query is required' }, { status: 400 })
     }
+
+    // Validate and sanitize query
+    const validation = validateSearchQuery(query)
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.error }, { status: 400 })
+    }
+    query = validation.sanitized
 
     // Use API key from request body if provided, otherwise fall back to environment variable
     const firecrawlApiKey = body.firecrawlApiKey || process.env.FIRECRAWL_API_KEY
@@ -54,6 +93,9 @@ export async function POST(request: Request) {
     const stream = createUIMessageStream({
       originalMessages: messages,
       execute: async ({ writer }) => {
+        let savedQueryId: string | null = null
+        let firecrawlStartTime = Date.now()
+
         try {
           let sources: Array<{
             url: string
@@ -102,6 +144,7 @@ export async function POST(request: Request) {
           })
 
           // Make direct API call to Firecrawl v2 search endpoint
+          firecrawlStartTime = Date.now()
           const searchResponse = await fetch('https://api.firecrawl.dev/v2/search', {
             method: 'POST',
             headers: {
@@ -119,14 +162,52 @@ export async function POST(request: Request) {
               }
             })
           })
+          const firecrawlEndTime = Date.now()
+          const firecrawlResponseTime = firecrawlEndTime - firecrawlStartTime
 
           if (!searchResponse.ok) {
             const errorData = await searchResponse.json()
+
+            // Track failed API usage
+            trackApiUsage({
+              user_id: userId,
+              query_id: savedQueryId,
+              api_provider: 'firecrawl',
+              api_endpoint: '/v2/search',
+              status_code: searchResponse.status,
+              response_time_ms: firecrawlResponseTime,
+              was_successful: false,
+              error_message: errorData.error || searchResponse.statusText,
+              request_count: 1,
+              tokens_used: null,
+              cost_usd: null,
+              metadata: {},
+            }).catch(err => console.error('Failed to track API usage:', err))
+
             throw new Error(`Firecrawl API error: ${errorData.error || searchResponse.statusText}`)
           }
 
           const searchResult = await searchResponse.json()
           const searchData = searchResult.data || {}
+
+          // Track successful Firecrawl API usage
+          trackApiUsage({
+            user_id: userId,
+            query_id: savedQueryId,
+            api_provider: 'firecrawl',
+            api_endpoint: '/v2/search',
+            status_code: searchResponse.status,
+            response_time_ms: firecrawlResponseTime,
+            was_successful: true,
+            error_message: null,
+            request_count: 1,
+            tokens_used: null,
+            cost_usd: null,
+            metadata: {
+              sources_requested: ['web', 'news', 'images'],
+              limit: 6,
+            },
+          }).catch(err => console.error('Failed to track API usage:', err))
 
           // Extract results from the v2 SDK response
           const webResults = searchData.web || []
@@ -175,6 +256,129 @@ export async function POST(request: Request) {
               position: item.position
             };
           }).filter(Boolean) || []  // Filter out null entries
+
+          // Save query to database
+          try {
+            const queryData: QueryInsert = {
+              user_id: userId,
+              query_text: query,
+              query_type: 'mixed', // Could be determined from the sources requested
+              response_metadata: {
+                request_id: requestId,
+                sources_count: sources.length + newsResults.length + imageResults.length,
+                web_count: sources.length,
+                news_count: newsResults.length,
+                image_count: imageResults.length,
+              },
+              response_time_ms: null, // Will be updated after full response
+              sources_count: sources.length + newsResults.length + imageResults.length,
+              was_successful: true,
+              error_message: null,
+              session_id: sessionId,
+              ip_address: null,
+              user_agent: null,
+              referer: null,
+            }
+
+            const savedQuery = await saveQuery(queryData)
+            if (savedQuery) {
+              savedQueryId = savedQuery.id
+
+              // Save search results to database
+              const searchResultsToSave: SearchResultInsert[] = []
+
+              // Add web results
+              sources.forEach((source, index) => {
+                searchResultsToSave.push({
+                  query_id: savedQueryId!,
+                  url: source.url,
+                  title: source.title,
+                  description: source.description || null,
+                  content: source.content || null,
+                  markdown: source.markdown || null,
+                  rank: index + 1,
+                  result_type: 'web',
+                  author: source.author || null,
+                  source: source.siteName || null,
+                  site_name: source.siteName || null,
+                  image_url: source.image || null,
+                  thumbnail_url: null,
+                  favicon_url: source.favicon || null,
+                  image_width: null,
+                  image_height: null,
+                  published_date: source.publishedDate || null,
+                  was_clicked: false,
+                  click_count: 0,
+                  time_spent_seconds: 0,
+                  metadata: {},
+                })
+              })
+
+              // Add news results
+              newsResults.forEach((news, index) => {
+                searchResultsToSave.push({
+                  query_id: savedQueryId!,
+                  url: news.url,
+                  title: news.title,
+                  description: news.description || null,
+                  content: null,
+                  markdown: null,
+                  rank: sources.length + index + 1,
+                  result_type: 'news',
+                  published_date: news.publishedDate || null,
+                  author: null,
+                  source: news.source || null,
+                  site_name: null,
+                  image_url: news.image || null,
+                  thumbnail_url: null,
+                  favicon_url: null,
+                  image_width: null,
+                  image_height: null,
+                  was_clicked: false,
+                  click_count: 0,
+                  time_spent_seconds: 0,
+                  metadata: {},
+                })
+              })
+
+              // Add image results
+              imageResults.forEach((image, index) => {
+                searchResultsToSave.push({
+                  query_id: savedQueryId!,
+                  url: image.url,
+                  title: image.title,
+                  description: null,
+                  content: null,
+                  markdown: null,
+                  rank: sources.length + newsResults.length + index + 1,
+                  result_type: 'image',
+                  published_date: null,
+                  author: null,
+                  source: image.source || null,
+                  site_name: null,
+                  image_url: image.url,
+                  thumbnail_url: image.thumbnail || null,
+                  favicon_url: null,
+                  image_width: image.width || null,
+                  image_height: image.height || null,
+                  was_clicked: false,
+                  click_count: 0,
+                  time_spent_seconds: 0,
+                  metadata: {
+                    position: image.position,
+                  },
+                })
+              })
+
+              // Batch save all results
+              if (searchResultsToSave.length > 0) {
+                await saveSearchResults(searchResultsToSave)
+              }
+            }
+          } catch (dbError) {
+            // Log but don't fail the request if database save fails
+            console.error('Failed to save query to database:', dbError)
+          }
 
           // Send all sources as a persistent data part
           writer.write({
@@ -283,6 +487,7 @@ export async function POST(request: Request) {
           }
 
           // Stream the text generation using Groq's Llama model
+          const groqStartTime = Date.now()
           const result = streamText({
             model: groq('llama-3.1-8b-instant'),
             messages: aiMessages,
@@ -295,6 +500,28 @@ export async function POST(request: Request) {
 
           // Get the full answer for follow-up generation
           const fullAnswer = await result.text
+          const groqEndTime = Date.now()
+          const groqResponseTime = groqEndTime - groqStartTime
+
+          // Track Groq API usage
+          trackApiUsage({
+            user_id: userId,
+            query_id: savedQueryId,
+            api_provider: 'groq',
+            api_endpoint: 'llama-3.1-8b-instant',
+            status_code: 200,
+            response_time_ms: groqResponseTime,
+            was_successful: true,
+            error_message: null,
+            request_count: 1,
+            tokens_used: null,
+            cost_usd: null,
+            metadata: {
+              temperature: 0.7,
+              model: 'llama-3.1-8b-instant',
+              message_count: aiMessages.length,
+            },
+          }).catch(err => console.error('Failed to track Groq API usage:', err))
 
           // Generate follow-up questions
           const conversationPreview = isFollowUp
