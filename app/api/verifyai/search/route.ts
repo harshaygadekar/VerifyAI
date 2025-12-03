@@ -302,6 +302,13 @@ export async function POST(request: Request) {
             if (savedQuery) {
               savedQueryId = savedQuery.id
 
+              // Send query ID to client
+              writer.write({
+                type: 'data-query-id',
+                id: 'query-id-1',
+                data: { queryId: savedQueryId }
+              })
+
               // Save search results to database
               const searchResultsToSave: SearchResultInsert[] = []
 

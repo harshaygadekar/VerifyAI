@@ -4,10 +4,13 @@ import { useRef, useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Loader2, User, Bot, Copy, Sparkles, FileText, Plus, ArrowUp,
-  Paperclip, Globe, Image as ImageIcon, Search, Check
+  Paperclip, Globe, Image as ImageIcon, Search, Check, Bookmark
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { useUser } from '@clerk/nextjs'
+import { toggleBookmark } from '@/lib/actions'
+import { toast } from 'sonner'
 import { SearchResult, NewsResult, ImageResult } from '../app/types'
 import { type UIMessage } from 'ai'
 import { MarkdownRenderer } from '../app/markdown-renderer'
@@ -24,7 +27,9 @@ interface MessageData {
   newsResults?: NewsResult[]
   imageResults?: ImageResult[]
   followUpQuestions: string[]
+
   ticker?: string
+  queryId?: string
 }
 
 interface ModernChatInterfaceProps {
@@ -87,7 +92,9 @@ export function ModernChatInterface({
   isLoading,
   input,
   handleInputChange,
-  handleSubmit
+  handleInputChange,
+  handleSubmit,
+  messageData
 }: ModernChatInterfaceProps) {
   console.log('ModernChatInterface messages:', messages);
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -99,7 +106,36 @@ export function ModernChatInterface({
   const { textareaRef, adjustHeight } = useAutoResizeTextarea({
     minHeight: 60,
     maxHeight: 200,
-  });
+  })
+
+  const { user } = useUser()
+
+  const handleBookmark = async (index: number) => {
+    if (!user) {
+      toast.error('Please sign in to bookmark')
+      return
+    }
+
+    const data = messageData?.get(index)
+    const queryId = data?.queryId
+
+    if (!queryId) {
+      toast.error('Cannot bookmark: Missing query ID')
+      return
+    }
+
+    // Find the preceding user message for the query text
+    const userMessage = messages[index - 1]
+    const queryText = userMessage?.role === 'user' ? getMessageContent(userMessage) : 'Saved Search'
+
+    try {
+      const { isBookmarked } = await toggleBookmark(user.id, queryId, queryText.slice(0, 50), queryText)
+      toast.success(isBookmarked ? 'Bookmark added' : 'Bookmark removed')
+    } catch (error) {
+      console.error('Bookmark error:', error)
+      toast.error('Failed to update bookmark')
+    }
+  };
 
   // Adjust height when input changes
   useEffect(() => {
@@ -267,6 +303,15 @@ export function ModernChatInterface({
                           <span className="ml-2 text-xs">
                             {copiedMessageId === (message.id || `${index}`) ? 'Copied!' : 'Copy'}
                           </span>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleBookmark(index)}
+                          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                        >
+                          <Bookmark className="w-4 h-4" />
+                          <span className="ml-2 text-xs">Bookmark</span>
                         </Button>
                       </div>
                     </div>

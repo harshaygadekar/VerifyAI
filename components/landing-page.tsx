@@ -5,8 +5,11 @@ import { ArrowRight, Search, Sparkles, Globe, Zap, Shield, Clock } from 'lucide-
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 
+import { SignInButton } from '@clerk/nextjs'
+
 interface LandingPageProps {
   onGetStarted: () => void
+  isSignedIn: boolean
 }
 
 const features = [
@@ -49,7 +52,7 @@ const stats = [
   { number: "<2s", label: "Average Response" }
 ]
 
-export function LandingPage({ onGetStarted }: LandingPageProps) {
+export function LandingPage({ onGetStarted, isSignedIn }: LandingPageProps) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800">
       {/* Hero Section */}
@@ -83,12 +86,22 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
               </p>
 
               <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+                {!isSignedIn && (
+                  <SignInButton mode="modal">
+                    <Button
+                      size="lg"
+                      className="bg-white text-orange-600 hover:bg-orange-50 border-2 border-orange-100 hover:border-orange-200 px-8 py-4 text-lg font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-200"
+                    >
+                      Sign In
+                    </Button>
+                  </SignInButton>
+                )}
                 <Button
                   onClick={onGetStarted}
                   size="lg"
                   className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-8 py-4 text-lg font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-200"
                 >
-                  Start Searching
+                  {isSignedIn ? 'Start Searching' : 'Try Demo'}
                   <ArrowRight className="ml-2 w-5 h-5" />
                 </Button>
 

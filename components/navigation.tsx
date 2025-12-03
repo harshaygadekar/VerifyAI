@@ -2,14 +2,15 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Home, MessageSquare, Settings, Menu, X, Sparkles } from 'lucide-react'
+import { Search, Home, MessageSquare, Settings, Menu, X, Sparkles, Bookmark } from 'lucide-react'
 import Link from 'next/link'
-import Image from 'next/image'
 import { ThemeToggle } from './theme-toggle'
+import { HistorySidebar } from './history-sidebar'
 import { Button } from '@/components/ui/button'
+import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton } from '@clerk/nextjs'
 
 interface NavigationProps {
-  currentPage?: 'home' | 'chat' | 'settings'
+  currentPage?: 'home' | 'chat' | 'settings' | 'bookmarks'
   onNewChat?: () => void
   showNewChatButton?: boolean
 }
@@ -35,11 +36,10 @@ export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton 
   return (
     <>
       <motion.header
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          isScrolled 
-            ? 'bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200/50 dark:border-gray-700/50' 
-            : 'bg-transparent'
-        }`}
+        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled
+          ? 'bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200/50 dark:border-gray-700/50'
+          : 'bg-transparent'
+          }`}
         initial={{ y: -100 }}
         animate={{ y: 0 }}
         transition={{ duration: 0.3 }}
@@ -64,14 +64,14 @@ export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton 
 
             {/* Desktop Navigation */}
             <nav className="hidden md:flex items-center gap-1">
+              <HistorySidebar />
               {navItems.map((item) => (
                 <Link key={item.id} href={item.href}>
                   <motion.div
-                    className={`relative px-4 py-2 rounded-lg transition-colors ${
-                      currentPage === item.id
-                        ? 'text-orange-600 dark:text-orange-400'
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
-                    }`}
+                    className={`relative px-4 py-2 rounded-lg transition-colors ${currentPage === item.id
+                      ? 'text-orange-600 dark:text-orange-400'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
+                      }`}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                   >
@@ -89,6 +89,28 @@ export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton 
                   </motion.div>
                 </Link>
               ))}
+              <Link href="/bookmarks">
+                <motion.div
+                  className={`relative px-4 py-2 rounded-lg transition-colors ${currentPage === 'bookmarks'
+                    ? 'text-orange-600 dark:text-orange-400'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
+                    }`}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Bookmark className="w-4 h-4" />
+                    <span className="font-medium">Bookmarks</span>
+                  </div>
+                  {currentPage === 'bookmarks' && (
+                    <motion.div
+                      className="absolute inset-0 bg-orange-100 dark:bg-orange-900/30 rounded-lg -z-10"
+                      layoutId="activeTab"
+                      transition={{ duration: 0.2 }}
+                    />
+                  )}
+                </motion.div>
+              </Link>
             </nav>
 
             {/* Actions */}
@@ -110,9 +132,21 @@ export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton 
                   </Button>
                 </motion.div>
               )}
-              
+
               <ThemeToggle />
-              
+
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <Button variant="ghost" size="sm">Sign In</Button>
+                </SignInButton>
+                <SignUpButton mode="modal">
+                  <Button size="sm" className="bg-orange-600 hover:bg-orange-700 text-white">Sign Up</Button>
+                </SignUpButton>
+              </SignedOut>
+              <SignedIn>
+                <UserButton />
+              </SignedIn>
+
               {/* Mobile menu button */}
               <Button
                 variant="ghost"
@@ -142,11 +176,11 @@ export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton 
             transition={{ duration: 0.2 }}
           >
             {/* Backdrop */}
-            <div 
+            <div
               className="absolute inset-0 bg-black/50 backdrop-blur-sm"
               onClick={() => setIsMobileMenuOpen(false)}
             />
-            
+
             {/* Menu */}
             <motion.div
               className="absolute top-16 left-4 right-4 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden"
@@ -163,22 +197,21 @@ export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton 
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: index * 0.1 }}
                   >
-                    <Link 
+                    <Link
                       href={item.href}
                       onClick={() => setIsMobileMenuOpen(false)}
                     >
-                      <div className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${
-                        currentPage === item.id
-                          ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
-                          : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'
-                      }`}>
+                      <div className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${currentPage === item.id
+                        ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'
+                        }`}>
                         <item.icon className="w-5 h-5" />
                         <span className="font-medium">{item.label}</span>
                       </div>
                     </Link>
                   </motion.div>
                 ))}
-                
+
                 {showNewChatButton && onNewChat && (
                   <motion.div
                     initial={{ opacity: 0, x: -20 }}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useChat } from '@ai-sdk/react'
+import { useUser } from '@clerk/nextjs'
 import { DefaultChatTransport } from 'ai'
 import { motion } from 'framer-motion'
 import { SearchComponent } from './search'
@@ -26,6 +27,7 @@ interface MessageData {
   imageResults?: ImageResult[]
   followUpQuestions: string[]
   ticker?: string
+  queryId?: string
 }
 
 export default function VerifyAIPage() {
@@ -45,7 +47,9 @@ export default function VerifyAIPage() {
   const [, setIsCheckingEnv] = useState<boolean>(true)
   const [pendingQuery, setPendingQuery] = useState<string>('')
   const [input, setInput] = useState<string>('')
+
   const [showLanding, setShowLanding] = useState<boolean>(true)
+  const { isSignedIn } = useUser()
 
   const { messages, sendMessage, status } = useChat({
     transport: new DefaultChatTransport({
@@ -92,6 +96,7 @@ export default function VerifyAIPage() {
       let latestTicker: string | null = null
       let latestFollowUpQuestions: string[] = []
       let latestStatus: string | null = null
+      let latestQueryId: string | null = null
 
       for (const part of lastMessage.parts) {
         // Handle different data part types
@@ -126,6 +131,11 @@ export default function VerifyAIPage() {
             duration: 5000,
           })
         }
+
+        if (part.type === 'data-query-id' && part.data) {
+          const data = part.data as any
+          latestQueryId = data.queryId
+        }
       }
 
       // Apply updates
@@ -139,7 +149,7 @@ export default function VerifyAIPage() {
       if (latestStatus !== null) setSearchStatus(latestStatus)
 
       // Update message data map
-      if (hasSourceData || latestTicker !== null || latestFollowUpQuestions.length > 0) {
+      if (hasSourceData || latestTicker !== null || latestFollowUpQuestions.length > 0 || latestQueryId !== null) {
         setMessageData(prevMap => {
           const newMap = new Map(prevMap)
           const existingData = newMap.get(currentMessageIndex.current) || { sources: [], followUpQuestions: [] }
@@ -151,7 +161,8 @@ export default function VerifyAIPage() {
               imageResults: latestImageResults
             }),
             ...(latestTicker !== null && { ticker: latestTicker }),
-            ...(latestFollowUpQuestions.length > 0 && { followUpQuestions: latestFollowUpQuestions })
+            ...(latestFollowUpQuestions.length > 0 && { followUpQuestions: latestFollowUpQuestions }),
+            ...(latestQueryId !== null && { queryId: latestQueryId })
           })
           return newMap
         })
@@ -278,7 +289,7 @@ export default function VerifyAIPage() {
 
   // Show landing page if showLanding is true
   if (showLanding) {
-    return <LandingPage onGetStarted={handleGetStarted} />
+    return <LandingPage onGetStarted={handleGetStarted} isSignedIn={!!isSignedIn} />
   }
 
   return (
