@@ -5,13 +5,12 @@ import type { ModelMessage } from 'ai'
 import { detectCompanyTicker } from '@/lib/company-ticker-map'
 import { selectRelevantContent } from '@/lib/content-selection'
 import { saveQuery, saveSearchResults, trackApiUsage } from '@/lib/db/queries'
-import type { QueryInsert, SearchResultInsert, ApiUsageInsert } from '@/lib/db/types'
-import { validateSearchQuery, sanitizeInput } from '@/lib/validations'
+import type { QueryInsert, SearchResultInsert } from '@/lib/db/types'
+import { validateSearchQuery } from '@/lib/validations'
 import { rateLimit, getClientIdentifier } from '@/lib/rate-limit'
 
 export async function POST(request: Request) {
   const requestId = Math.random().toString(36).substring(7)
-  const startTime = Date.now()
 
   // Rate limiting
   const identifier = getClientIdentifier(request)
@@ -93,10 +92,12 @@ export async function POST(request: Request) {
     const stream = createUIMessageStream({
       originalMessages: messages,
       execute: async ({ writer }) => {
+        console.log('Starting search execution...');
         let savedQueryId: string | null = null
         let firecrawlStartTime = Date.now()
 
         try {
+          console.log('Initializing variables...');
           let sources: Array<{
             url: string
             title: string
@@ -145,28 +146,45 @@ export async function POST(request: Request) {
 
           // Make direct API call to Firecrawl v2 search endpoint
           firecrawlStartTime = Date.now()
-          const searchResponse = await fetch('https://api.firecrawl.dev/v2/search', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${firecrawlApiKey}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              query: query,
-              sources: ['web', 'news', 'images'],
-              limit: 6,
-              scrapeOptions: {
-                formats: ['markdown'],
-                onlyMainContent: true,
-                maxAge: 86400000  // 24 hours in milliseconds
-              }
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+
+          let searchResponse;
+          try {
+            console.log('Fetching from Firecrawl...');
+            searchResponse = await fetch('https://api.firecrawl.dev/v2/search', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${firecrawlApiKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                query: query,
+                sources: ['web', 'news', 'images'],
+                limit: 6,
+                scrapeOptions: {
+                  formats: ['markdown'],
+                  onlyMainContent: true,
+                  maxAge: 86400000  // 24 hours in milliseconds
+                }
+              }),
+              signal: controller.signal
             })
-          })
+            clearTimeout(timeoutId);
+            console.log('Firecrawl response status:', searchResponse.status);
+          } catch (error: any) {
+            if (error.name === 'AbortError') {
+              throw new Error('Search timed out');
+            }
+            throw error;
+          }
+
           const firecrawlEndTime = Date.now()
           const firecrawlResponseTime = firecrawlEndTime - firecrawlStartTime
 
           if (!searchResponse.ok) {
-            const errorData = await searchResponse.json()
+            const errorData = await searchResponse.json().catch(() => ({ error: 'Unknown error' }))
+            console.error('Firecrawl error:', errorData);
 
             // Track failed API usage
             trackApiUsage({
@@ -288,7 +306,7 @@ export async function POST(request: Request) {
               const searchResultsToSave: SearchResultInsert[] = []
 
               // Add web results
-              sources.forEach((source, index) => {
+              for (const [index, source] of sources.entries()) {
                 searchResultsToSave.push({
                   query_id: savedQueryId!,
                   url: source.url,
@@ -312,10 +330,10 @@ export async function POST(request: Request) {
                   time_spent_seconds: 0,
                   metadata: {},
                 })
-              })
+              }
 
               // Add news results
-              newsResults.forEach((news, index) => {
+              for (const [index, news] of newsResults.entries()) {
                 searchResultsToSave.push({
                   query_id: savedQueryId!,
                   url: news.url,
@@ -339,10 +357,10 @@ export async function POST(request: Request) {
                   time_spent_seconds: 0,
                   metadata: {},
                 })
-              })
+              }
 
               // Add image results
-              imageResults.forEach((image, index) => {
+              for (const [index, image] of imageResults.entries()) {
                 searchResultsToSave.push({
                   query_id: savedQueryId!,
                   url: image.url,
@@ -368,7 +386,7 @@ export async function POST(request: Request) {
                     position: image.position,
                   },
                 })
-              })
+              }
 
               // Batch save all results
               if (searchResultsToSave.length > 0) {
@@ -448,7 +466,8 @@ export async function POST(request: Request) {
                 - Keep responses natural and conversational
                 - Include citations inline as [1], [2], etc. when referencing specific sources
                 - Citations should correspond to the source order (first source = [1], second = [2], etc.)
-                - Use the format [1] not CITATION_1 or any other format`
+                - Use the format [1] not CITATION_1 or any other format
+                - DO NOT list the sources at the end of your response. They are already displayed in the UI.`
               },
               {
                 role: 'user',
@@ -474,7 +493,8 @@ export async function POST(request: Request) {
                 - Use markdown when it helps clarity
                 - Include citations inline as [1], [2], etc. when referencing specific sources
                 - Citations should correspond to the source order (first source = [1], second = [2], etc.)
-                - Use the format [1] not CITATION_1 or any other format`
+                - Use the format [1] not CITATION_1 or any other format
+                - DO NOT list the sources at the end of your response. They are already displayed in the UI.`
               },
               // Include conversation context - convert UIMessages to ModelMessages
               ...convertToModelMessages(messages.slice(0, -1)),
@@ -487,96 +507,112 @@ export async function POST(request: Request) {
           }
 
           // Stream the text generation using Groq's Llama model
+          console.log('Starting Groq streamText...');
           const groqStartTime = Date.now()
-          const result = streamText({
-            model: groq('llama-3.1-8b-instant'),
-            messages: aiMessages,
-            temperature: 0.7,
-            maxRetries: 2
-          })
-
-          // Merge the AI stream into our UIMessage stream
-          writer.merge(result.toUIMessageStream())
-
-          // Get the full answer for follow-up generation
-          const fullAnswer = await result.text
-          const groqEndTime = Date.now()
-          const groqResponseTime = groqEndTime - groqStartTime
-
-          // Track Groq API usage
-          trackApiUsage({
-            user_id: userId,
-            query_id: savedQueryId,
-            api_provider: 'groq',
-            api_endpoint: 'llama-3.1-8b-instant',
-            status_code: 200,
-            response_time_ms: groqResponseTime,
-            was_successful: true,
-            error_message: null,
-            request_count: 1,
-            tokens_used: null,
-            cost_usd: null,
-            metadata: {
-              temperature: 0.7,
-              model: 'llama-3.1-8b-instant',
-              message_count: aiMessages.length,
-            },
-          }).catch(err => console.error('Failed to track Groq API usage:', err))
-
-          // Generate follow-up questions
-          const conversationPreview = isFollowUp
-            ? messages.map((m: { role: string; parts?: any[] }) => {
-              const content = m.parts
-                ? m.parts.filter((p: any) => p.type === 'text').map((p: any) => p.text).join(' ')
-                : ''
-              return `${m.role}: ${content}`
-            }).join('\n\n')
-            : `user: ${query}`
-
           try {
-            const followUpResponse = await generateText({
+            const result = streamText({
               model: groq('llama-3.1-8b-instant'),
-              messages: [
-                {
-                  role: 'system',
-                  content: `Generate 5 natural follow-up questions based on the query and answer.\n                \n                ONLY generate questions if the query warrants them:\n                - Skip for simple greetings or basic acknowledgments\n                - Create questions that feel natural, not forced\n                - Make them genuinely helpful, not just filler\n                - Focus on the topic and sources available\n                \n                If the query doesn't need follow-ups, return an empty response.
-                  ${isFollowUp ? 'Consider the full conversation history and avoid repeating previous questions.' : ''}
-                  Return only the questions, one per line, no numbering or bullets.`
-                },
-                {
-                  role: 'user',
-                  content: `Query: ${query}\n\nAnswer provided: ${fullAnswer.substring(0, 500)}...\n\n${sources.length > 0 ? `Available sources about: ${sources.map((s: { title: string }) => s.title).join(', ')}\n\n` : ''}Generate 5 diverse follow-up questions that would help the user learn more about this topic from different angles.`
-                }
-              ],
+              messages: aiMessages,
               temperature: 0.7,
               maxRetries: 2
             })
 
-            // Process follow-up questions
-            const followUpQuestions = followUpResponse.text
-              .split('\n')
-              .map((q: string) => q.trim())
-              .filter((q: string) => q.length > 0)
-              .slice(0, 5)
+            console.log('Groq stream created, merging...');
+            // Merge the AI stream into our UIMessage stream
+            writer.merge(result.toUIMessageStream())
+            console.log('Groq stream merged.');
 
-            // Send follow-up questions as a data part
-            writer.write({
-              type: 'data-followup',
-              id: 'followup-1',
-              data: { questions: followUpQuestions }
-            })
-          } catch (followUpError) {
-            // Error generating follow-up questions
+            // Get the full answer for follow-up generation
+            const fullAnswer = await result.text
+            console.log('Full answer received length:', fullAnswer.length);
+            const groqEndTime = Date.now()
+            const groqResponseTime = groqEndTime - groqStartTime
+
+            // Track Groq API usage
+            trackApiUsage({
+              user_id: userId,
+              query_id: savedQueryId,
+              api_provider: 'groq',
+              api_endpoint: 'llama-3.1-8b-instant',
+              status_code: 200,
+              response_time_ms: groqResponseTime,
+              was_successful: true,
+              error_message: null,
+              request_count: 1,
+              tokens_used: null,
+              cost_usd: null,
+              metadata: {
+                temperature: 0.7,
+                model: 'llama-3.1-8b-instant',
+                message_count: aiMessages.length,
+              },
+            }).catch(err => console.error('Failed to track Groq API usage:', err))
+
+            // Generate follow-up questions
+            try {
+              const sourceTitles = sources.map((s: { title: string }) => s.title).join(', ')
+              const sourceContext = sources.length > 0 ? `Available sources about: ${sourceTitles}\n\n` : ''
+
+              const followUpResponse = await generateText({
+                model: groq('llama-3.1-8b-instant'),
+                messages: [
+                  {
+                    role: 'system',
+                    content: `Generate 5 natural follow-up questions based on the query and answer.
+                
+                ONLY generate questions if the query warrants them:
+                - Skip for simple greetings or basic acknowledgments
+                - Create questions that feel natural, not forced
+                - Make them genuinely helpful, not just filler
+                - Focus on the topic and sources available
+                
+                If the query doesn't need follow-ups, return an empty response.
+                  ${isFollowUp ? 'Consider the full conversation history and avoid repeating previous questions.' : ''}
+                  Return only the questions, one per line, no numbering or bullets.`
+                  },
+                  {
+                    role: 'user',
+                    content: `Query: ${query}\n\nAnswer provided: ${fullAnswer.substring(0, 500)}...\n\n${sourceContext}Generate 5 diverse follow-up questions that would help the user learn more about this topic from different angles.`
+                  }
+                ],
+                temperature: 0.7,
+                maxRetries: 2
+              })
+
+              // Process follow-up questions
+              const followUpQuestions = followUpResponse.text
+                .split('\n')
+                .map((q: string) => q.trim())
+                .filter((q: string) => q.length > 0)
+                .slice(0, 5)
+
+              // Send follow-up questions as a data part
+              writer.write({
+                type: 'data-followup',
+                id: 'followup-1',
+                data: { questions: followUpQuestions }
+              })
+            } catch (followUpError) {
+              // Error generating follow-up questions - silently fail as this is optional
+              console.error('Failed to generate follow-up questions:', followUpError)
+            }
+          } catch (error) {
+            console.error('Error in Groq generation:', error);
+            throw error;
           }
 
         } catch (error) {
           // Handle specific error types
           const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-          const statusCode = error && typeof error === 'object' && 'statusCode' in error
-            ? error.statusCode
-            : error && typeof error === 'object' && 'status' in error
-              ? error.status
-              : undefined
+
+          let statusCode: number | undefined
+          if (error && typeof error === 'object') {
+            if ('statusCode' in error) {
+              statusCode = (error as any).statusCode
+            } else if ('status' in error) {
+              statusCode = (error as any).status
+            }
+          }
 
           // Provide user-friendly error messages
           const errorResponses: Record<number, { error: string; suggestion?: string }> = {
@@ -598,8 +634,8 @@ export async function POST(request: Request) {
             }
           }
 
-          const errorResponse = statusCode && errorResponses[statusCode as keyof typeof errorResponses]
-            ? errorResponses[statusCode as keyof typeof errorResponses]
+          const errorResponse = statusCode && errorResponses[statusCode]
+            ? errorResponses[statusCode]
             : { error: errorMessage }
 
           writer.write({

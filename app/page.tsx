@@ -49,18 +49,18 @@ export default function VerifyAIPage() {
 
   const { messages, sendMessage, status } = useChat({
     transport: new DefaultChatTransport({
-      api: '/api/fireplexity/search',
+      api: '/api/verifyai/search',
       body: firecrawlApiKey ? { firecrawlApiKey } : undefined
     })
   })
-  
+
   // Single consolidated effect for handling streaming data
   useEffect(() => {
     // Handle response start
     if (status === 'streaming' && messages.length > 0) {
       const assistantMessages = messages.filter(m => m.role === 'assistant')
       const newIndex = assistantMessages.length
-      
+
       // Only clear if we're starting a new message
       if (newIndex !== currentMessageIndex.current) {
         setSearchStatus('')
@@ -73,17 +73,17 @@ export default function VerifyAIPage() {
         lastDataLength.current = 0  // Reset data tracking for new message
       }
     }
-    
+
     // Handle data parts from messages
     if (messages.length > 0) {
-      const lastMessage = messages[messages.length - 1]
-      if (!lastMessage.parts || lastMessage.parts.length === 0) return
-      
+      const lastMessage = messages.at(-1)
+      if (!lastMessage?.parts || lastMessage.parts.length === 0) return
+
       // Check if we've already processed this data
       const partsLength = lastMessage.parts.length
       if (partsLength === lastDataLength.current) return
       lastDataLength.current = partsLength
-      
+
       // Process ALL parts to accumulate data
       let hasSourceData = false
       let latestSources: SearchResult[] = []
@@ -92,30 +92,42 @@ export default function VerifyAIPage() {
       let latestTicker: string | null = null
       let latestFollowUpQuestions: string[] = []
       let latestStatus: string | null = null
-      
-      lastMessage.parts.forEach((part: any) => {
+
+      for (const part of lastMessage.parts) {
         // Handle different data part types
         if (part.type === 'data-sources' && part.data) {
+          const data = part.data as any
           hasSourceData = true
           // Use the latest data from this part
-          if (part.data.sources) latestSources = part.data.sources
-          if (part.data.newsResults) latestNewsResults = part.data.newsResults
-          if (part.data.imageResults) latestImageResults = part.data.imageResults
+          if (data.sources) latestSources = data.sources
+          if (data.newsResults) latestNewsResults = data.newsResults
+          if (data.imageResults) latestImageResults = data.imageResults
         }
-        
+
         if (part.type === 'data-ticker' && part.data) {
-          latestTicker = part.data.symbol
+          const data = part.data as any
+          latestTicker = data.symbol
         }
-        
-        if (part.type === 'data-followup' && part.data && part.data.questions) {
-          latestFollowUpQuestions = part.data.questions
+
+        if (part.type === 'data-followup' && part.data && (part.data as any).questions) {
+          const data = part.data as any
+          latestFollowUpQuestions = data.questions
         }
-        
+
         if (part.type === 'data-status' && part.data) {
-          latestStatus = part.data.message || ''
+          const data = part.data as any
+          latestStatus = data.message || ''
         }
-      })
-      
+
+        if (part.type === 'data-error' && part.data) {
+          const data = part.data as any
+          toast.error(data.error, {
+            description: data.suggestion,
+            duration: 5000,
+          })
+        }
+      }
+
       // Apply updates
       if (hasSourceData) {
         setSources(latestSources)
@@ -125,7 +137,7 @@ export default function VerifyAIPage() {
       if (latestTicker !== null) setCurrentTicker(latestTicker)
       if (latestFollowUpQuestions.length > 0) setFollowUpQuestions(latestFollowUpQuestions)
       if (latestStatus !== null) setSearchStatus(latestStatus)
-      
+
       // Update message data map
       if (hasSourceData || latestTicker !== null || latestFollowUpQuestions.length > 0) {
         setMessageData(prevMap => {
@@ -133,7 +145,7 @@ export default function VerifyAIPage() {
           const existingData = newMap.get(currentMessageIndex.current) || { sources: [], followUpQuestions: [] }
           newMap.set(currentMessageIndex.current, {
             ...existingData,
-            ...(hasSourceData && { 
+            ...(hasSourceData && {
               sources: latestSources,
               newsResults: latestNewsResults,
               imageResults: latestImageResults
@@ -151,9 +163,9 @@ export default function VerifyAIPage() {
   useEffect(() => {
     const checkApiKey = async () => {
       try {
-        const response = await fetch('/api/fireplexity/check-env')
+        const response = await fetch('/api/verifyai/check-env')
         const data = await response.json()
-        
+
         if (data.hasFirecrawlKey) {
           setHasApiKey(true)
         } else {
@@ -165,12 +177,13 @@ export default function VerifyAIPage() {
           }
         }
       } catch (error) {
-        // Error checking environment
+        // Error checking environment - silently fail
+        console.error('Failed to check environment:', error)
       } finally {
         setIsCheckingEnv(false)
       }
     }
-    
+
     checkApiKey()
   }, [])
 
@@ -180,7 +193,7 @@ export default function VerifyAIPage() {
       setHasApiKey(true)
       setShowApiKeyModal(false)
       toast.success('API key saved successfully!')
-      
+
       // If there's a pending query, submit it
       if (pendingQuery) {
         sendMessage({ text: pendingQuery })
@@ -192,14 +205,14 @@ export default function VerifyAIPage() {
   const handleSearch = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!input.trim()) return
-    
+
     // Check if we have an API key
     if (!hasApiKey) {
       setPendingQuery(input)
       setShowApiKeyModal(true)
       return
     }
-    
+
     setHasSearched(true)
     setShowLanding(false)
     // Don't clear data here - wait for new data to arrive
@@ -207,19 +220,19 @@ export default function VerifyAIPage() {
     sendMessage({ text: input })
     setInput('')
   }
-  
+
   // Wrapped submit handler for chat interface
   const handleChatSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!input.trim()) return
-    
+
     // Check if we have an API key
     if (!hasApiKey) {
       setPendingQuery(input)
       setShowApiKeyModal(true)
       return
     }
-    
+
     // Store current data in messageData before new query
     if (messages.length > 0 && sources.length > 0) {
       const assistantMessages = messages.filter(m => m.role === 'assistant')
@@ -236,7 +249,7 @@ export default function VerifyAIPage() {
         setMessageData(newMap)
       }
     }
-    
+
     // Don't clear data here - wait for new data to arrive
     // The useEffect will clear when it detects a new assistant message starting
     sendMessage({ text: input })
@@ -271,7 +284,7 @@ export default function VerifyAIPage() {
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-gray-900 transition-colors">
       {/* Navigation */}
-      <Navigation 
+      <Navigation
         currentPage={isChatActive ? 'chat' : 'home'}
         onNewChat={isChatActive ? handleNewChat : undefined}
         showNewChatButton={isChatActive}
@@ -308,7 +321,7 @@ export default function VerifyAIPage() {
           {showSearchInterface ? (
             <div className="px-4 sm:px-6 lg:px-8">
               <div className="max-w-7xl mx-auto">
-                <SearchComponent 
+                <SearchComponent
                   handleSubmit={handleSearch}
                   input={input}
                   handleInputChange={(e) => setInput(e.target.value)}
@@ -317,7 +330,7 @@ export default function VerifyAIPage() {
               </div>
             </div>
           ) : (
-            <ModernChatInterface 
+            <ModernChatInterface
               messages={messages}
               sources={sources}
               newsResults={newsResults}
@@ -335,7 +348,7 @@ export default function VerifyAIPage() {
         </div>
       </div>
 
-      
+
       {/* API Key Modal */}
       <Dialog open={showApiKeyModal} onOpenChange={setShowApiKeyModal}>
         <DialogContent className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
@@ -343,9 +356,9 @@ export default function VerifyAIPage() {
             <DialogTitle className="text-gray-900 dark:text-gray-100">Firecrawl API Key Required</DialogTitle>
             <DialogDescription className="text-gray-600 dark:text-gray-400">
               To use VerifyAI search, you need a Firecrawl API key. Get one for free at{' '}
-              <a 
-                href="https://www.firecrawl.dev" 
-                target="_blank" 
+              <a
+                href="https://www.firecrawl.dev"
+                target="_blank"
                 rel="noopener noreferrer"
                 className="text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 underline transition-colors"
               >
