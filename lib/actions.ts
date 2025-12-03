@@ -1,10 +1,15 @@
 'use server'
 
-import { createServerClient as createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
+import { createOrGetUser } from '@/lib/db/queries'
+import { currentUser } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 
 export async function getChatHistory(userId: string) {
-    const supabase = await createClient()
+    const user = await currentUser()
+    if (user?.id !== userId) return []
+
+    const supabase = createAdminClient()
 
     const { data, error } = await supabase
         .from('queries')
@@ -22,7 +27,10 @@ export async function getChatHistory(userId: string) {
 }
 
 export async function getBookmarks(userId: string) {
-    const supabase = await createClient()
+    const user = await currentUser()
+    if (user?.id !== userId) return []
+
+    const supabase = createAdminClient()
 
     const { data, error } = await supabase
         .from('saved_searches')
@@ -39,7 +47,16 @@ export async function getBookmarks(userId: string) {
 }
 
 export async function toggleBookmark(userId: string, queryId: string, title: string, queryText: string) {
-    const supabase = await createClient()
+    const user = await currentUser()
+    if (user?.id !== userId) throw new Error('Unauthorized')
+
+    // Ensure user exists in Supabase
+    await createOrGetUser(user.emailAddresses[0].emailAddress, {
+        id: user.id,
+        email: user.emailAddresses[0].emailAddress
+    })
+
+    const supabase = createAdminClient()
 
     // Check if already bookmarked
     const { data: existing } = await supabase
@@ -77,7 +94,10 @@ export async function toggleBookmark(userId: string, queryId: string, title: str
 }
 
 export async function deleteBookmark(bookmarkId: string) {
-    const supabase = await createClient()
+    const user = await currentUser()
+    if (!user) throw new Error('Unauthorized')
+
+    const supabase = createAdminClient()
 
     const { error } = await supabase
         .from('saved_searches')

@@ -19,7 +19,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Stores user account information and preferences
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS users (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id TEXT PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   username TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -52,7 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active) WHERE is_acti
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS queries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
 
   -- Query details
   query_text TEXT NOT NULL,
@@ -147,8 +147,8 @@ CREATE INDEX IF NOT EXISTS idx_search_results_url ON search_results(url);
 -- Tracks user sessions and activity
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS user_sessions (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  user_sessions_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
 
   -- Session timing
   session_start TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -210,7 +210,7 @@ CREATE INDEX IF NOT EXISTS idx_query_feedback_rating ON query_feedback(rating);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS api_usage (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
   query_id UUID REFERENCES queries(id) ON DELETE CASCADE,
 
   -- API details
@@ -247,7 +247,7 @@ CREATE INDEX IF NOT EXISTS idx_api_usage_created_at ON api_usage(created_at DESC
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS saved_searches (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   query_id UUID REFERENCES queries(id) ON DELETE SET NULL,
 
   -- Saved search details

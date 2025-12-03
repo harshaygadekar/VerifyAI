@@ -10,9 +10,9 @@ import { Button } from '@/components/ui/button'
 import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton } from '@clerk/nextjs'
 
 interface NavigationProps {
-  currentPage?: 'home' | 'chat' | 'settings' | 'bookmarks'
-  onNewChat?: () => void
-  showNewChatButton?: boolean
+  readonly currentPage?: 'home' | 'chat' | 'settings' | 'bookmarks'
+  readonly onNewChat?: () => void
+  readonly showNewChatButton?: boolean
 }
 
 export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton = false }: NavigationProps) {
@@ -37,12 +37,12 @@ export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton 
     <>
       <motion.header
         className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled
-          ? 'bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200/50 dark:border-gray-700/50'
+          ? 'bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-800/50 shadow-sm'
           : 'bg-transparent'
           }`}
         initial={{ y: -100 }}
         animate={{ y: 0 }}
-        transition={{ duration: 0.3 }}
+        transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
@@ -176,9 +176,11 @@ export function Navigation({ currentPage = 'home', onNewChat, showNewChatButton 
             transition={{ duration: 0.2 }}
           >
             {/* Backdrop */}
-            <div
-              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm w-full h-full border-none cursor-default"
               onClick={() => setIsMobileMenuOpen(false)}
+              aria-label="Close menu"
             />
 
             {/* Menu */}

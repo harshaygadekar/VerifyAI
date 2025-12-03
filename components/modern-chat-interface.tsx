@@ -16,8 +16,8 @@ import { type UIMessage } from 'ai'
 import { MarkdownRenderer } from '../app/markdown-renderer'
 import { TypingIndicator, SearchLoadingSteps } from './loading-animation'
 import { ImageResults } from '../app/image-results'
+
 import { NewsResults } from '../app/news-results'
-import { type ResponseLength } from './response-length-selector'
 import Image from 'next/image'
 import { useAutoResizeTextarea } from '@/hooks/use-auto-resize-textarea'
 import { cn } from '@/lib/utils'
@@ -33,20 +33,17 @@ interface MessageData {
 }
 
 interface ModernChatInterfaceProps {
-  messages: UIMessage[]
-  sources: SearchResult[]
-  newsResults: NewsResult[]
-  imageResults: ImageResult[]
-  followUpQuestions: string[]
-  searchStatus: string
-  isLoading: boolean
-  input: string
-  handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
-  handleSubmit: (e: React.FormEvent<HTMLFormElement>) => void
-  messageData?: Map<number, MessageData>
-  currentTicker?: string | null
-  responseLength?: ResponseLength
-  onResponseLengthChange?: (length: ResponseLength) => void
+  readonly messages: UIMessage[]
+  readonly sources: SearchResult[]
+  readonly newsResults: NewsResult[]
+  readonly imageResults: ImageResult[]
+  readonly followUpQuestions: string[]
+  readonly searchStatus: string
+  readonly isLoading: boolean
+  readonly input: string
+  readonly handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
+  readonly handleSubmit: (e: React.FormEvent<HTMLFormElement>) => void
+  readonly messageData?: Map<number, MessageData>
 }
 
 // Helper function to extract text content from UIMessage
@@ -64,9 +61,9 @@ function getMessageContent(message: UIMessage): string {
 }
 
 interface ActionButtonProps {
-  icon: React.ReactNode;
-  label: string;
-  onClick?: () => void;
+  readonly icon: React.ReactNode;
+  readonly label: string;
+  readonly onClick?: () => void;
 }
 
 function ActionButton({ icon, label, onClick }: ActionButtonProps) {
@@ -92,7 +89,7 @@ export function ModernChatInterface({
   isLoading,
   input,
   handleInputChange,
-  handleInputChange,
+
   handleSubmit,
   messageData
 }: ModernChatInterfaceProps) {
@@ -214,121 +211,132 @@ export function ModernChatInterface({
       {/* Messages Container */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto px-4 py-6 space-y-8"
+        className="flex-1 overflow-y-auto pb-48 scroll-smooth"
         onScroll={handleScroll}
       >
-        <div className="max-w-3xl mx-auto space-y-8">
-          {/* Welcome Message */}
-          {messages.length === 0 && (
-            <motion.div
-              className="text-center py-12"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
-            >
-              <div className="w-16 h-16 bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-orange-500/20">
-                <Sparkles className="w-8 h-8 text-white" />
-              </div>
-              <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4 tracking-tight">
-                What can I help you find?
-              </h1>
-              <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto mb-8">
-                Ask me anything and I&apos;ll search the web, analyze sources, and provide you with comprehensive answers.
-              </p>
+        <div className="max-w-4xl mx-auto py-8">
+          <AnimatePresence>
+            {messages.length === 0 && (
+              <motion.div
+                className="text-center py-12"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.6 }}
+              >
+                <div className="w-16 h-16 bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-orange-500/20">
+                  <Sparkles className="w-8 h-8 text-white" />
+                </div>
+                <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4 tracking-tight">
+                  What can I help you find?
+                </h1>
+                <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto mb-8">
+                  Ask me anything and I&apos;ll search the web, analyze sources, and provide you with comprehensive answers.
+                </p>
 
-              {/* Quick Actions */}
-              <div className="flex flex-wrap items-center justify-center gap-3">
-                <ActionButton
-                  icon={<Globe className="w-4 h-4 text-blue-500" />}
-                  label="Search Web"
-                  onClick={() => handleActionClick('search')}
-                />
-                <ActionButton
-                  icon={<ImageIcon className="w-4 h-4 text-purple-500" />}
-                  label="Find Images"
-                  onClick={() => handleActionClick('image')}
-                />
-                <ActionButton
-                  icon={<Search className="w-4 h-4 text-orange-500" />}
-                  label="Deep Research"
-                  onClick={() => handleActionClick('research')}
-                />
-              </div>
-            </motion.div>
-          )}
+                {/* Quick Actions */}
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <ActionButton
+                    icon={<Globe className="w-4 h-4 text-blue-500" />}
+                    label="Search Web"
+                    onClick={() => handleActionClick('search')}
+                  />
+                  <ActionButton
+                    icon={<ImageIcon className="w-4 h-4 text-purple-500" />}
+                    label="Find Images"
+                    onClick={() => handleActionClick('image')}
+                  />
+                  <ActionButton
+                    icon={<Search className="w-4 h-4 text-orange-500" />}
+                    label="Deep Research"
+                    onClick={() => handleActionClick('research')}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Messages */}
           <AnimatePresence>
-            {messages.map((message, index) => (
-              <motion.div
-                key={message.id || index}
-                className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: index * 0.1 }}
-              >
-                {message.role === 'assistant' && (
-                  <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-orange-600 rounded-full flex items-center justify-center flex-shrink-0 shadow-md">
-                    <Bot className="w-5 h-5 text-white" />
-                  </div>
-                )}
-
-                <div className={`max-w-3xl ${message.role === 'user' ? 'order-first' : ''}`}>
-                  {message.role === 'user' ? (
-                    <div className="bg-orange-600 text-white rounded-3xl rounded-br-sm px-6 py-4 shadow-md max-w-[85%] ml-auto">
-                      <p className="text-base leading-relaxed">{getMessageContent(message)}</p>
-                    </div>
-                  ) : (
-                    <div className="bg-white dark:bg-gray-800/50 rounded-3xl rounded-bl-sm px-6 py-4 shadow-sm border border-gray-100 dark:border-gray-700/50">
-                      <div className="prose prose-gray max-w-none dark:prose-invert prose-sm">
-                        <MarkdownRenderer
-                          content={getMessageContent(message)}
-                          sources={sources}
-                        />
-                      </div>
-
-                      {/* Message Actions */}
-                      <div className="flex items-center gap-2 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCopy(getMessageContent(message), message.id || `${index}`)}
-                          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                        >
-                          {copiedMessageId === (message.id || `${index}`) ? (
-                            <Check className="w-4 h-4 text-green-500" />
-                          ) : (
-                            <Copy className="w-4 h-4" />
-                          )}
-                          <span className="ml-2 text-xs">
-                            {copiedMessageId === (message.id || `${index}`) ? 'Copied!' : 'Copy'}
-                          </span>
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleBookmark(index)}
-                          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                        >
-                          <Bookmark className="w-4 h-4" />
-                          <span className="ml-2 text-xs">Bookmark</span>
-                        </Button>
-                      </div>
+            {messages
+              .filter(msg => {
+                // Filter out empty assistant messages to prevent blank bubbles
+                if (msg.role === 'assistant') {
+                  const content = getMessageContent(msg)
+                  return content.trim().length > 0
+                }
+                return true
+              })
+              .map((message, index) => (
+                <motion.div
+                  key={message.id || `msg-${index}`}
+                  className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: index * 0.1 }}
+                >
+                  {message.role === 'assistant' && (
+                    <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-orange-600 rounded-full flex items-center justify-center flex-shrink-0 shadow-md">
+                      <Bot className="w-5 h-5 text-white" />
                     </div>
                   )}
-                </div>
 
-                {message.role === 'user' && (
-                  <div className="w-8 h-8 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0">
-                    <User className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                  <div className={`max-w-3xl ${message.role === 'user' ? 'order-first' : ''}`}>
+                    {message.role === 'user' ? (
+                      <div className="bg-orange-600 text-white rounded-3xl rounded-br-sm px-6 py-4 shadow-md max-w-[85%] ml-auto">
+                        <p className="text-base leading-relaxed">{getMessageContent(message)}</p>
+                      </div>
+                    ) : (
+                      <div className="bg-white dark:bg-gray-800/50 rounded-3xl rounded-bl-sm px-6 py-4 shadow-sm border border-gray-100 dark:border-gray-700/50">
+                        <div className="prose prose-gray max-w-none dark:prose-invert prose-sm">
+                          <MarkdownRenderer
+                            content={getMessageContent(message)}
+                            sources={sources}
+                          />
+                        </div>
+
+                        {/* Message Actions */}
+                        <div className="flex items-center gap-2 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleCopy(getMessageContent(message), message.id || `${index}`)}
+                            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                          >
+                            {copiedMessageId === (message.id || `${index}`) ? (
+                              <Check className="w-4 h-4 text-green-500" />
+                            ) : (
+                              <Copy className="w-4 h-4" />
+                            )}
+                            <span className="ml-2 text-xs">
+                              {copiedMessageId === (message.id || `${index}`) ? 'Copied!' : 'Copy'}
+                            </span>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleBookmark(index)}
+                            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                          >
+                            <Bookmark className="w-4 h-4" />
+                            <span className="ml-2 text-xs">Bookmark</span>
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
-              </motion.div>
-            ))}
+
+                  {message.role === 'user' && (
+                    <div className="w-8 h-8 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0">
+                      <User className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                    </div>
+                  )}
+                </motion.div>
+              ))}
           </AnimatePresence>
 
           {/* Loading States */}
-          {isLoading && messages[messages.length - 1]?.role === 'user' && (
+          {isLoading && messages.at(-1)?.role === 'user' && (
             <motion.div
               className="flex gap-4 justify-start"
               initial={{ opacity: 0, y: 20 }}
@@ -363,7 +371,7 @@ export function ModernChatInterface({
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {sources.slice(0, 6).map((source, index) => (
                   <motion.a
-                    key={index}
+                    key={source.url || index}
                     href={source.url}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -435,7 +443,7 @@ export function ModernChatInterface({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {followUpQuestions.map((question, index) => (
                   <motion.button
-                    key={index}
+                    key={question || index}
                     onClick={() => handleFollowUpClick(question)}
                     className="text-left p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-orange-300 dark:hover:border-orange-600 hover:shadow-md transition-all group"
                     whileHover={{ scale: 1.02 }}
@@ -463,7 +471,7 @@ export function ModernChatInterface({
       <AnimatePresence>
         {!isAtBottom && (
           <motion.div
-            className="absolute bottom-32 right-8"
+            className="fixed bottom-32 right-8 z-50"
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.8 }}
@@ -481,11 +489,11 @@ export function ModernChatInterface({
         )}
       </AnimatePresence>
 
-      {/* Input Area */}
-      <div className="border-t border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm">
-        <div className="max-w-4xl mx-auto p-4">
+      {/* Input Area - Fixed at Bottom */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border-t border-gray-200/50 dark:border-gray-800/50 pb-6 pt-4">
+        <div className="max-w-4xl mx-auto px-4">
           <form ref={formRef} onSubmit={handleFormSubmit} className="relative max-w-3xl mx-auto">
-            <div className="relative bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-xl shadow-orange-500/5 focus-within:border-orange-400 dark:focus-within:border-orange-600 focus-within:shadow-2xl focus-within:shadow-orange-500/10 transition-all duration-300 overflow-hidden">
+            <div className="relative bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-2xl shadow-orange-500/10 focus-within:border-orange-400 dark:focus-within:border-orange-600 focus-within:shadow-orange-500/20 transition-all duration-300 overflow-hidden group">
               <div className="overflow-y-auto max-h-[200px]">
                 <Textarea
                   ref={textareaRef}
@@ -503,7 +511,7 @@ export function ModernChatInterface({
                     "border-none",
                     "text-gray-900 dark:text-white text-base md:text-sm",
                     "focus:outline-none focus:ring-0",
-                    "placeholder:text-gray-500 dark:placeholder:text-gray-400",
+                    "placeholder:text-gray-400 dark:placeholder:text-gray-500",
                     "min-h-[60px]"
                   )}
                   style={{ overflow: 'hidden' }}
@@ -515,10 +523,10 @@ export function ModernChatInterface({
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    className="group p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-1 text-gray-500 dark:text-gray-400"
+                    className="group/btn p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2 text-gray-500 dark:text-gray-400"
                   >
-                    <Paperclip className="w-4 h-4" />
-                    <span className="text-xs hidden group-hover:inline transition-opacity font-medium">
+                    <Paperclip className="w-4 h-4 group-hover/btn:text-orange-500 transition-colors" />
+                    <span className="text-xs hidden sm:inline font-medium group-hover/btn:text-gray-700 dark:group-hover/btn:text-gray-300 transition-colors">
                       Attach
                     </span>
                   </button>
@@ -526,7 +534,7 @@ export function ModernChatInterface({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    className="px-2 py-1.5 rounded-lg text-xs font-medium text-gray-500 dark:text-gray-400 transition-colors border border-dashed border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-1"
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 dark:text-gray-400 transition-colors border border-dashed border-gray-300 dark:border-gray-600 hover:border-orange-400 dark:hover:border-orange-500 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 flex items-center gap-1.5"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     Project
@@ -535,10 +543,10 @@ export function ModernChatInterface({
                     type="submit"
                     disabled={!input.trim() || isLoading}
                     className={cn(
-                      "px-2 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1",
+                      "px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5",
                       input.trim() && !isLoading
-                        ? "bg-orange-500 text-white hover:bg-orange-600 shadow-sm"
-                        : "bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed"
+                        ? "bg-gradient-to-r from-orange-500 to-orange-600 text-white hover:from-orange-600 hover:to-orange-700 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                        : "bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed"
                     )}
                   >
                     {isLoading ? (
@@ -546,12 +554,12 @@ export function ModernChatInterface({
                     ) : (
                       <ArrowUp className="w-3.5 h-3.5" />
                     )}
-                    <span className="sr-only">Send</span>
+                    <span>Send</span>
                   </button>
                 </div>
               </div>
             </div>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 text-center">
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2 text-center font-medium tracking-wide uppercase opacity-70">
               VerifyAI can make mistakes. Check important info.
             </p>
           </form>

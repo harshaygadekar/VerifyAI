@@ -49,12 +49,15 @@ export default function VerifyAIPage() {
   const [input, setInput] = useState<string>('')
 
   const [showLanding, setShowLanding] = useState<boolean>(true)
-  const { isSignedIn } = useUser()
+  const { user, isSignedIn } = useUser()
 
   const { messages, sendMessage, status } = useChat({
     transport: new DefaultChatTransport({
       api: '/api/verifyai/search',
-      body: firecrawlApiKey ? { firecrawlApiKey } : undefined
+      body: {
+        firecrawlApiKey: firecrawlApiKey || undefined,
+        userId: user?.id
+      }
     })
   })
 
@@ -353,7 +356,6 @@ export default function VerifyAIPage() {
               handleInputChange={(e) => setInput(e.target.value)}
               handleSubmit={handleChatSubmit}
               messageData={messageData}
-              currentTicker={currentTicker}
             />
           )}
         </div>
