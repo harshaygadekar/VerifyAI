@@ -101,6 +101,64 @@ export async function getQueryHistory(
     return []
   }
 }
+/**
+ * Update a query with its full response text
+ *
+ * @param queryId - Query ID
+ * @param responseText - The full text response from the AI
+ * @param responseTimeMs - Total response time in ms
+ * @returns Success status
+ */
+export async function updateQueryResponse(
+  queryId: string,
+  responseText: string,
+  responseTimeMs?: number
+): Promise<boolean> {
+  try {
+    const supabase = createAdminClient()
+
+    // First fetch existing metadata to merge with it
+    const { data: existingQuery, error: fetchError } = await supabase
+      .from('queries')
+      .select('response_metadata')
+      .eq('id', queryId)
+      .single()
+
+    if (fetchError) {
+      console.error('Error fetching existing query:', fetchError)
+      return false
+    }
+
+    const existingMetadata = (existingQuery as any)?.response_metadata || {}
+
+    const updateData: any = {
+      response_metadata: {
+        ...existingMetadata,
+        full_response: responseText
+      }
+    }
+
+    if (responseTimeMs !== undefined) {
+      updateData.response_time_ms = responseTimeMs
+    }
+
+    const { error } = await supabase
+      .from('queries')
+      .update(updateData as never)
+      .eq('id', queryId)
+
+    if (error) {
+      console.error('Error updating query response:', error)
+      return false
+    }
+
+    console.log('Successfully saved response for query:', queryId)
+    return true
+  } catch (error) {
+    console.error('Unexpected error updating query response:', error)
+    return false
+  }
+}
 
 /**
  * Get a single query by ID with its search results
@@ -110,8 +168,8 @@ export async function getQueryHistory(
  */
 export async function getQueryWithResults(queryId: string): Promise<
   | (Query & {
-      search_results: SearchResult[]
-    })
+    search_results: SearchResult[]
+  })
   | null
 > {
   try {

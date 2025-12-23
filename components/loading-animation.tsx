@@ -8,17 +8,17 @@ interface LoadingAnimationProps {
   variant?: 'default' | 'minimal' | 'pulse'
 }
 
-export function LoadingAnimation({ 
-  message = "Thinking...", 
+export function LoadingAnimation({
+  message = "Thinking...",
   size = 'md',
-  variant = 'default' 
+  variant = 'default'
 }: LoadingAnimationProps) {
   const sizeClasses = {
     sm: { container: 'py-4', ring: 'w-8 h-8', dots: 'w-6 h-6', dot: 'w-1.5 h-1.5', text: 'text-xs' },
     md: { container: 'py-6', ring: 'w-12 h-12', dots: 'w-8 h-8', dot: 'w-2 h-2', text: 'text-sm' },
     lg: { container: 'py-8', ring: 'w-16 h-16', dots: 'w-12 h-12', dot: 'w-3 h-3', text: 'text-base' }
   }
-  
+
   const classes = sizeClasses[size]
 
   if (variant === 'minimal') {
@@ -48,7 +48,7 @@ export function LoadingAnimation({
             <motion.div
               key={i}
               className={`${classes.dot} bg-orange-500 dark:bg-orange-400 rounded-full`}
-              animate={{ 
+              animate={{
                 scale: [1, 1.5, 1],
                 opacity: [0.5, 1, 0.5]
               }}
@@ -74,7 +74,7 @@ export function LoadingAnimation({
 
   return (
     <AnimatePresence>
-      <motion.div 
+      <motion.div
         className={`flex flex-col items-center justify-center ${classes.container}`}
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -89,7 +89,7 @@ export function LoadingAnimation({
             animate={{ rotate: 360 }}
             transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
           />
-          
+
           {/* Inner spinning dots */}
           <div className="absolute inset-0 flex items-center justify-center">
             <motion.div
@@ -124,7 +124,7 @@ export function LoadingAnimation({
               ))}
             </motion.div>
           </div>
-          
+
           {/* Center pulse */}
           <motion.div
             className="absolute inset-0 flex items-center justify-center"
@@ -134,7 +134,7 @@ export function LoadingAnimation({
             <div className={`${size === 'sm' ? 'w-0.5 h-0.5' : size === 'md' ? 'w-1 h-1' : 'w-1.5 h-1.5'} bg-orange-600 dark:bg-orange-300 rounded-full`} />
           </motion.div>
         </div>
-        
+
         {/* Animated text */}
         <motion.p
           className={`${classes.text} text-gray-600 dark:text-gray-400 font-medium`}
@@ -143,7 +143,7 @@ export function LoadingAnimation({
         >
           {message}
         </motion.p>
-        
+
         {/* Typing dots */}
         <div className="flex space-x-1 mt-2">
           {[0, 1, 2].map((i) => (
@@ -171,7 +171,7 @@ export function InlineLoading({ size = "sm" }: { size?: "sm" | "md" }) {
     sm: "w-4 h-4",
     md: "w-6 h-6"
   }
-  
+
   return (
     <motion.div
       className={`${sizeClasses[size]} border-2 border-orange-200 dark:border-orange-700 border-t-orange-500 dark:border-t-orange-400 rounded-full`}
@@ -190,7 +190,7 @@ export function TypingIndicator() {
           <motion.div
             key={i}
             className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full"
-            animate={{ 
+            animate={{
               scale: [1, 1.3, 1],
               opacity: [0.5, 1, 0.5]
             }}
@@ -208,38 +208,30 @@ export function TypingIndicator() {
   )
 }
 
-// Search loading with steps
+// Search loading with steps - clean and professional
 export function SearchLoadingSteps({ currentStep }: { currentStep: string }) {
-  const steps = [
-    "Searching the web...",
-    "Analyzing sources...", 
-    "Generating response...",
-    "Almost done..."
-  ]
-  
   return (
-    <motion.div 
-      className="flex flex-col items-center gap-4 py-6"
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
+    <motion.div
+      className="flex items-center gap-3 py-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
     >
-      <LoadingAnimation message={currentStep} size="md" variant="default" />
-      
-      <div className="flex items-center gap-2">
-        {steps.map((step, index) => (
-          <motion.div
-            key={step}
-            className={`h-1 rounded-full transition-all duration-300 ${
-              step === currentStep 
-                ? 'w-8 bg-orange-500 dark:bg-orange-400' 
-                : 'w-2 bg-gray-300 dark:bg-gray-600'
-            }`}
-            animate={step === currentStep ? { scale: [1, 1.1, 1] } : {}}
-            transition={{ duration: 0.5, repeat: Infinity }}
-          />
-        ))}
-      </div>
+      {/* Simple spinner */}
+      <motion.div
+        className="w-4 h-4 border-2 border-orange-200 dark:border-orange-700 border-t-orange-500 dark:border-t-orange-400 rounded-full"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+      />
+
+      {/* Status text */}
+      <motion.span
+        className="text-sm text-gray-600 dark:text-gray-400"
+        animate={{ opacity: [0.7, 1, 0.7] }}
+        transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+      >
+        {currentStep}
+      </motion.span>
     </motion.div>
   )
 }

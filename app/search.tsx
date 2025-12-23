@@ -1,10 +1,9 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Search, Loader2, Sparkles, Zap, Globe, Image as ImageIcon } from 'lucide-react'
+import { Search, Sparkles, Zap, Globe, Image as ImageIcon } from 'lucide-react'
 import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
 import { InlineLoading } from '@/components/loading-animation'
 
 interface SearchComponentProps {
@@ -42,16 +41,15 @@ export function SearchComponent({ handleSubmit, input, handleInputChange, isLoad
   return (
     <div className="max-w-4xl mx-auto pt-12 space-y-8">
       {/* Main Search Form */}
-      <motion.form 
-        onSubmit={handleSubmit} 
+      <motion.form
+        onSubmit={handleSubmit}
         className="relative"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, delay: 0.2 }}
       >
-        <div className={`relative flex items-center transition-all duration-300 ${
-          isFocused ? 'transform scale-105' : ''
-        }`}>
+        <div className={`relative flex items-center transition-all duration-300 ${isFocused ? 'transform scale-105' : ''
+          }`}>
           <div className="absolute left-4 z-10">
             <Search className="w-5 h-5 text-gray-400" />
           </div>
@@ -79,19 +77,19 @@ export function SearchComponent({ handleSubmit, input, handleInputChange, isLoad
                   <InlineLoading size="sm" />
                 </div>
               ) : (
-                <svg 
-                  fill="none" 
-                  height="20" 
-                  viewBox="0 0 20 20" 
-                  width="20" 
+                <svg
+                  fill="none"
+                  height="20"
+                  viewBox="0 0 20 20"
+                  width="20"
                   xmlns="http://www.w3.org/2000/svg"
                   className="text-white"
                 >
-                  <path 
-                    d="M11.6667 4.79163L16.875 9.99994M16.875 9.99994L11.6667 15.2083M16.875 9.99994H3.125" 
-                    stroke="currentColor" 
-                    strokeLinecap="round" 
-                    strokeLinejoin="round" 
+                  <path
+                    d="M11.6667 4.79163L16.875 9.99994M16.875 9.99994L11.6667 15.2083M16.875 9.99994H3.125"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
                     strokeWidth="1.5"
                   />
                 </svg>

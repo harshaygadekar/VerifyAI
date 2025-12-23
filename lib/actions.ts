@@ -11,19 +11,49 @@ export async function getChatHistory(userId: string) {
 
     const supabase = createAdminClient()
 
-    const { data, error } = await supabase
+    // First, get the Supabase user ID by email (since queries are saved with Supabase UUIDs, not Clerk IDs)
+    const userEmail = user.emailAddresses?.[0]?.emailAddress
+    if (!userEmail) return []
+
+    const { data: supabaseUser, error: userError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', userEmail)
+        .single()
+
+    if (userError || !supabaseUser) {
+        console.error('Error fetching Supabase user:', userError)
+        return []
+    }
+
+    const { data: queries, error } = await supabase
         .from('queries')
-        .select('*')
-        .eq('user_id', userId)
+        .select('id, query_text, created_at, session_id, query_type')
+        .eq('user_id', (supabaseUser as any).id)
         .order('created_at', { ascending: false })
-        .limit(50)
+        .limit(100)
 
     if (error) {
         console.error('Error fetching chat history:', error)
         return []
     }
 
-    return data
+    const sessionsMap = new Map()
+
+    for (const query of (queries as any[])) {
+        const sessionId = query.session_id || `legacy-${query.id}`
+        if (!sessionsMap.has(sessionId)) {
+            sessionsMap.set(sessionId, {
+                id: sessionId,
+                title: query.query_text,
+                created_at: query.created_at,
+                is_legacy: !query.session_id,
+                query_type: query.query_type
+            })
+        }
+    }
+
+    return Array.from(sessionsMap.values())
 }
 
 export async function getBookmarks(userId: string) {
@@ -107,3 +137,60 @@ export async function deleteBookmark(bookmarkId: string) {
     if (error) throw error
     revalidatePath('/bookmarks')
 }
+
+export async function getSessionMessages(sessionId: string) {
+    const user = await currentUser()
+    if (!user) return []
+
+    const supabase = createAdminClient()
+
+    const { data, error } = await supabase
+        .from('queries')
+        .select('*, search_results(*)')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: true })
+
+    if (error) {
+        console.error('Error fetching session messages:', error)
+        return []
+    }
+
+    const queryData = data as any[]
+
+    // Convert queries to messages format
+    const messages: any[] = []
+    const messageData = new Map()
+
+    for (const query of queryData) {
+        messages.push({
+            id: query.id,
+            role: 'user',
+            content: query.query_text,
+            createdAt: new Date(query.created_at)
+        })
+
+        const fullResponse = (query.response_metadata as any)?.full_response
+        if (fullResponse) {
+            const assistantId = `assistant-${query.id}`
+            messages.push({
+                id: assistantId,
+                role: 'assistant',
+                content: fullResponse,
+                createdAt: new Date(query.created_at)
+            })
+
+            // Store sources in messageData if they exist
+            if (query.search_results && query.search_results.length > 0) {
+                messageData.set(assistantId, {
+                    sources: query.search_results.filter((r: any) => r.result_type === 'web'),
+                    news: query.search_results.filter((r: any) => r.result_type === 'news'),
+                    images: query.search_results.filter((r: any) => r.result_type === 'image'),
+                    queryId: query.id
+                })
+            }
+        }
+    }
+
+    return { messages, messageData: Array.from(messageData.entries()) }
+}
+

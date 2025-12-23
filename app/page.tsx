@@ -7,7 +7,9 @@ import { motion } from 'framer-motion'
 import { SearchComponent } from './search'
 import { SearchResult, NewsResult, ImageResult } from './types'
 import { Button } from '@/components/ui/button'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { getSessionMessages } from '@/lib/actions'
 import {
   Dialog,
   DialogContent,
@@ -30,7 +32,8 @@ interface MessageData {
   queryId?: string
 }
 
-export default function VerifyAIPage() {
+// Main content component that uses useSearchParams
+function VerifyAIPageContent() {
   const [sources, setSources] = useState<SearchResult[]>([])
   const [newsResults, setNewsResults] = useState<NewsResult[]>([])
   const [imageResults, setImageResults] = useState<ImageResult[]>([])
@@ -44,28 +47,121 @@ export default function VerifyAIPage() {
   const [firecrawlApiKey, setFirecrawlApiKey] = useState<string>('')
   const [hasApiKey, setHasApiKey] = useState<boolean>(false)
   const [showApiKeyModal, setShowApiKeyModal] = useState<boolean>(false)
-  const [, setIsCheckingEnv] = useState<boolean>(true)
   const [pendingQuery, setPendingQuery] = useState<string>('')
   const [input, setInput] = useState<string>('')
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
 
   const [showLanding, setShowLanding] = useState<boolean>(true)
+  const [sessionId, setSessionId] = useState<string>('')
   const { user, isSignedIn } = useUser()
 
-  const { messages, sendMessage, status } = useChat({
+  // Initialize sessionId on mount or from URL
+  const searchParams = useSearchParams()
+  const sessionIdFromUrl = searchParams.get('sid')
+
+  // Get URL parameters
+  const queryFromUrl = searchParams.get('q')
+
+  useEffect(() => {
+    if (sessionIdFromUrl) {
+      setSessionId(sessionIdFromUrl)
+      setShowLanding(false) // Always skip landing when loading a session
+    } else if (queryFromUrl) {
+      // Legacy URL with ?q=... - auto-submit the query
+      setShowLanding(false)
+      if (!sessionId) {
+        setSessionId(crypto.randomUUID())
+      }
+    } else if (!sessionId) {
+      setSessionId(crypto.randomUUID())
+    }
+  }, [sessionIdFromUrl, sessionId, queryFromUrl])
+
+  // Use refs to get current values in prepareSendMessagesRequest
+  const sessionIdRef = useRef(sessionId)
+  const userIdRef = useRef(user?.id)
+  const userEmailRef = useRef(user?.emailAddresses?.[0]?.emailAddress)
+  const firecrawlApiKeyRef = useRef(firecrawlApiKey)
+
+  // Keep refs in sync
+  useEffect(() => {
+    sessionIdRef.current = sessionId
+    userIdRef.current = user?.id
+    userEmailRef.current = user?.emailAddresses?.[0]?.emailAddress
+    firecrawlApiKeyRef.current = firecrawlApiKey
+  }, [sessionId, user?.id, user?.emailAddresses, firecrawlApiKey])
+
+  const { messages, sendMessage, status, setMessages } = (useChat as any)({
     transport: new DefaultChatTransport({
       api: '/api/verifyai/search',
       body: {
-        firecrawlApiKey: firecrawlApiKey || undefined,
-        userId: user?.id
+        firecrawlApiKey: firecrawlApiKeyRef.current || undefined,
+        userId: userIdRef.current,
+        userEmail: userEmailRef.current,
+        sessionId: sessionIdRef.current
       }
     })
   })
 
-  // Single consolidated effect for handling streaming data
   useEffect(() => {
-    // Handle response start
+    if (sessionIdFromUrl && user?.id) {
+      loadSessionData(sessionIdFromUrl)
+    }
+  }, [sessionIdFromUrl, user?.id])
+
+  // Auto-submit query from URL parameter (legacy links)
+  const hasAutoSubmitted = useRef(false)
+  useEffect(() => {
+    if (queryFromUrl && hasApiKey && !hasAutoSubmitted.current && !sessionIdFromUrl) {
+      hasAutoSubmitted.current = true
+      setHasSearched(true)
+      setIsSubmitting(true)
+      sendMessage({ text: queryFromUrl })
+    }
+  }, [queryFromUrl, hasApiKey, sessionIdFromUrl, sendMessage])
+
+  const loadSessionData = async (sid: string) => {
+    try {
+      const result = await getSessionMessages(sid)
+      if (result && (result as any).messages) {
+        setMessages((result as any).messages)
+
+        // Reconstruct messageData map
+        const dataPairs = (result as any).messageData || []
+        const newDataMap = new Map()
+
+        // We need to map assistant message IDs/indices
+        // The implementation uses assistant index, so we'll try to match them
+        const assistantMessages = (result as any).messages.filter((m: any) => m.role === 'assistant')
+
+        assistantMessages.forEach((msg: any, index: number) => {
+          const assistantId = msg.id
+          const pair = dataPairs.find(([key]: [string]) => key === assistantId)
+          if (pair) {
+            newDataMap.set(index + 1, pair[1])
+          }
+        })
+
+        setMessageData(newDataMap)
+        setHasSearched(true)
+        setShowLanding(false)
+      }
+    } catch (error) {
+      console.error('Failed to load session history:', error)
+      toast.error('Failed to load chat history')
+    }
+  }
+
+  // Single consolidated effect for handling streaming data
+  // Extract values outside useEffect to avoid complex expressions in dependency array
+  const lastMessage = messages.at(-1)
+  const lastMessagePartsLength = lastMessage?.parts?.length ?? 0
+
+  useEffect(() => {
+    // Handle response start - clear isSubmitting when we start receiving data
     if (status === 'streaming' && messages.length > 0) {
-      const assistantMessages = messages.filter(m => m.role === 'assistant')
+      setIsSubmitting(false) // Loading indicator should transition to streaming state
+      const assistantMessages = messages.filter((m: { role: string }) => m.role === 'assistant')
       const newIndex = assistantMessages.length
 
       // Only clear if we're starting a new message
@@ -81,9 +177,13 @@ export default function VerifyAIPage() {
       }
     }
 
+    // Clear isSubmitting when status changes to ready (response complete)
+    if (status === 'ready') {
+      setIsSubmitting(false)
+    }
+
     // Handle data parts from messages
-    if (messages.length > 0) {
-      const lastMessage = messages.at(-1)
+    if (messages.length > 0 && lastMessage) {
       if (!lastMessage?.parts || lastMessage.parts.length === 0) return
 
       // Check if we've already processed this data
@@ -104,7 +204,7 @@ export default function VerifyAIPage() {
       for (const part of lastMessage.parts) {
         // Handle different data part types
         if (part.type === 'data-sources' && part.data) {
-          const data = part.data as any
+          const data = part.data as { sources?: SearchResult[]; newsResults?: NewsResult[]; imageResults?: ImageResult[] }
           hasSourceData = true
           // Use the latest data from this part
           if (data.sources) latestSources = data.sources
@@ -113,22 +213,22 @@ export default function VerifyAIPage() {
         }
 
         if (part.type === 'data-ticker' && part.data) {
-          const data = part.data as any
-          latestTicker = data.symbol
+          const data = part.data as { symbol?: string }
+          latestTicker = data.symbol ?? null
         }
 
-        if (part.type === 'data-followup' && part.data && (part.data as any).questions) {
-          const data = part.data as any
-          latestFollowUpQuestions = data.questions
+        if (part.type === 'data-followup' && part.data) {
+          const data = part.data as { questions?: string[] }
+          if (data.questions) latestFollowUpQuestions = data.questions
         }
 
         if (part.type === 'data-status' && part.data) {
-          const data = part.data as any
+          const data = part.data as { message?: string }
           latestStatus = data.message || ''
         }
 
         if (part.type === 'data-error' && part.data) {
-          const data = part.data as any
+          const data = part.data as { error?: string; suggestion?: string }
           toast.error(data.error, {
             description: data.suggestion,
             duration: 5000,
@@ -136,8 +236,14 @@ export default function VerifyAIPage() {
         }
 
         if (part.type === 'data-query-id' && part.data) {
-          const data = part.data as any
-          latestQueryId = data.queryId
+          const data = part.data as { queryId?: string }
+          latestQueryId = data.queryId ?? null
+        }
+
+        // Handle search completion - dispatch event for history sidebar refresh
+        if (part.type === 'data-search-completed' && part.data) {
+          // Dispatch custom event to refresh history sidebar
+          globalThis.dispatchEvent(new CustomEvent('verifyai:search-completed'))
         }
       }
 
@@ -171,7 +277,7 @@ export default function VerifyAIPage() {
         })
       }
     }
-  }, [status, messages.length, messages[messages.length - 1]?.parts?.length])
+  }, [status, messages, lastMessage, lastMessagePartsLength])
 
   // Check for environment variables on mount
   useEffect(() => {
@@ -193,8 +299,6 @@ export default function VerifyAIPage() {
       } catch (error) {
         // Error checking environment - silently fail
         console.error('Failed to check environment:', error)
-      } finally {
-        setIsCheckingEnv(false)
       }
     }
 
@@ -229,6 +333,7 @@ export default function VerifyAIPage() {
 
     setHasSearched(true)
     setShowLanding(false)
+    setIsSubmitting(true) // Show loading indicator immediately
     // Don't clear data here - wait for new data to arrive
     // This prevents layout jump
     sendMessage({ text: input })
@@ -249,7 +354,7 @@ export default function VerifyAIPage() {
 
     // Store current data in messageData before new query
     if (messages.length > 0 && sources.length > 0) {
-      const assistantMessages = messages.filter(m => m.role === 'assistant')
+      const assistantMessages = messages.filter((m: any) => m.role === 'assistant')
       const lastAssistantIndex = assistantMessages.length - 1
       if (lastAssistantIndex >= 0) {
         const newMap = new Map(messageData)
@@ -266,6 +371,7 @@ export default function VerifyAIPage() {
 
     // Don't clear data here - wait for new data to arrive
     // The useEffect will clear when it detects a new assistant message starting
+    setIsSubmitting(true) // Show loading indicator immediately
     sendMessage({ text: input })
     setInput('')
   }
@@ -315,7 +421,7 @@ export default function VerifyAIPage() {
             >
               <h1 className="text-[3rem] lg:text-[4rem] font-bold tracking-tight leading-tight">
                 <span className="bg-gradient-to-r from-orange-500 to-orange-600 bg-clip-text text-transparent block">
-                  VerifyAI v2
+                  VerifyAI
                 </span>
                 <span className="text-[#262626] dark:text-white block text-[3rem] lg:text-[4rem] font-bold -mt-2 transition-colors">
                   Search & Scrape
@@ -352,6 +458,7 @@ export default function VerifyAIPage() {
               followUpQuestions={followUpQuestions}
               searchStatus={searchStatus}
               isLoading={status === 'streaming'}
+              isSubmitting={isSubmitting}
               input={input}
               handleInputChange={(e) => setInput(e.target.value)}
               handleSubmit={handleChatSubmit}
@@ -399,5 +506,18 @@ export default function VerifyAIPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+// Wrapper component with Suspense boundary for useSearchParams
+export default function VerifyAIPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
+        <div className="animate-pulse text-gray-500 dark:text-gray-400">Loading...</div>
+      </div>
+    }>
+      <VerifyAIPageContent />
+    </Suspense>
   )
 }

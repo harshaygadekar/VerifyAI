@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useUser } from '@clerk/nextjs'
 import { getBookmarks, deleteBookmark } from '@/lib/actions'
 import { Navigation } from '@/components/navigation'
@@ -15,31 +15,32 @@ export default function BookmarksPage() {
     const [bookmarks, setBookmarks] = useState<any[]>([])
     const [isLoading, setIsLoading] = useState(true)
 
+    const loadBookmarks = useCallback(async () => {
+        if (!user) return
+        try {
+            const data = await getBookmarks(user.id)
+            setBookmarks(data)
+        } catch (_error) {
+            toast.error('Failed to load bookmarks')
+        } finally {
+            setIsLoading(false)
+        }
+    }, [user])
+
     useEffect(() => {
         if (isLoaded && isSignedIn && user) {
             loadBookmarks()
         } else if (isLoaded && !isSignedIn) {
             setIsLoading(false)
         }
-    }, [isLoaded, isSignedIn, user])
-
-    const loadBookmarks = async () => {
-        try {
-            const data = await getBookmarks(user!.id)
-            setBookmarks(data)
-        } catch (error) {
-            toast.error('Failed to load bookmarks')
-        } finally {
-            setIsLoading(false)
-        }
-    }
+    }, [isLoaded, isSignedIn, user, loadBookmarks])
 
     const handleDelete = async (id: string) => {
         try {
             await deleteBookmark(id)
             setBookmarks(bookmarks.filter(b => b.id !== id))
             toast.success('Bookmark removed')
-        } catch (error) {
+        } catch (_error) {
             toast.error('Failed to remove bookmark')
         }
     }

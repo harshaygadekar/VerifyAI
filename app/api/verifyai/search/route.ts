@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createGroq } from '@ai-sdk/groq'
-import { streamText, generateText, createUIMessageStream, createUIMessageStreamResponse, convertToModelMessages } from 'ai'
+import { streamText, generateText, createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import type { ModelMessage } from 'ai'
 import { detectCompanyTicker } from '@/lib/company-ticker-map'
 import { selectRelevantContent } from '@/lib/content-selection'
-import { saveQuery, saveSearchResults, trackApiUsage } from '@/lib/db/queries'
+import { saveQuery, saveSearchResults, trackApiUsage, createOrGetUser, updateQueryResponse } from '@/lib/db/queries'
 import type { QueryInsert, SearchResultInsert } from '@/lib/db/types'
 import { validateSearchQuery } from '@/lib/validations'
 import { rateLimit, getClientIdentifier } from '@/lib/rate-limit'
@@ -24,7 +24,7 @@ function parseDate(dateStr: string | undefined | null): string | null {
   }
 }
 
-// Helper: Fetch and track Firecrawl search
+// Helper: Fetch and track Firecrawl search (uses Exa AI under the hood)
 async function fetchFirecrawlSearch(
   query: string,
   firecrawlApiKey: string,
@@ -33,25 +33,26 @@ async function fetchFirecrawlSearch(
 ) {
   const firecrawlStartTime = Date.now()
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 15000)
+  const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
 
   let searchResponse
   try {
     console.log('Fetching from Firecrawl...')
-    searchResponse = await fetch('https://api.firecrawl.dev/v2/search', {
+    // Using Exa AI search endpoint
+    searchResponse = await fetch('https://api.exa.ai/search', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${firecrawlApiKey}`,
+        'x-api-key': firecrawlApiKey,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         query: query,
-        sources: ['web', 'news', 'images'],
-        limit: 6,
-        scrapeOptions: {
-          formats: ['markdown'],
-          onlyMainContent: true,
-          maxAge: 86400000
+        numResults: 10,
+        type: 'auto',
+        useAutoprompt: true, // Enable Exa's auto-prompting for better results
+        contents: {
+          text: { maxCharacters: 4000 },
+          highlights: { numSentences: 3 } // Get highlights for better context
         }
       }),
       signal: controller.signal
@@ -76,7 +77,7 @@ async function fetchFirecrawlSearch(
       user_id: userId,
       query_id: savedQueryId,
       api_provider: 'firecrawl',
-      api_endpoint: '/v2/search',
+      api_endpoint: '/search',
       status_code: searchResponse.status,
       response_time_ms: firecrawlResponseTime,
       was_successful: false,
@@ -96,7 +97,7 @@ async function fetchFirecrawlSearch(
     user_id: userId,
     query_id: savedQueryId,
     api_provider: 'firecrawl',
-    api_endpoint: '/v2/search',
+    api_endpoint: '/search',
     status_code: searchResponse.status,
     response_time_ms: firecrawlResponseTime,
     was_successful: true,
@@ -105,38 +106,46 @@ async function fetchFirecrawlSearch(
     tokens_used: null,
     cost_usd: null,
     metadata: {
-      sources_requested: ['web', 'news', 'images'],
-      limit: 6,
+      numResults: 8,
+      type: 'auto',
     },
   }).catch(err => console.error('Failed to track API usage:', err))
 
-  return searchResult.data || {}
+  // Return results in a format compatible with the existing transform function
+  // Exa returns { results: [...] }, we need to map it to { web: [...] }
+  return { web: searchResult.results || [], news: [], images: [] }
 }
 
-// Helper: Transform search results
+// Helper: Transform search results (handles Exa AI response format)
 function transformSearchResults(searchData: any) {
   const webResults = searchData.web || []
   const newsData = searchData.news || []
   const imagesData = searchData.images || []
 
-  const sources = webResults.map((item: any) => ({
-    url: item.url,
-    title: item.title || item.url,
-    description: item.description || item.snippet,
-    content: item.content,
-    markdown: item.markdown,
-    favicon: item.favicon,
-    image: item.ogImage || item.image || item.metadata?.ogImage,
-    siteName: new URL(item.url).hostname
-  })).filter((item: any) => item.url) || []
+  const sources = webResults.map((item: any) => {
+    // Handle Exa AI response format
+    // Exa returns: { url, title, text, publishedDate, author, image, favicon, highlights }
+    const description = item.highlights?.[0] || item.description || item.text?.substring(0, 300) || item.snippet || ''
+
+    return {
+      url: item.url,
+      title: item.title || item.url,
+      description: description,
+      content: item.text || item.content,
+      markdown: item.text || item.markdown, // Exa returns text, not markdown
+      favicon: item.favicon,
+      image: item.image || item.ogImage || item.metadata?.ogImage,
+      siteName: item.url ? new URL(item.url).hostname : undefined
+    }
+  }).filter((item: any) => item.url) || []
 
   const newsResults = newsData.map((item: any) => ({
     url: item.url,
     title: item.title,
-    description: item.snippet || item.description,
-    publishedDate: parseDate(item.date),
+    description: item.text?.substring(0, 300) || item.snippet || item.description,
+    publishedDate: parseDate(item.publishedDate || item.date),
     source: item.source || (item.url ? new URL(item.url).hostname : undefined),
-    image: item.imageUrl
+    image: item.image || item.imageUrl
   })).filter((item: any) => item.url) || []
 
   const imageResults = imagesData.map((item: any) => {
@@ -156,18 +165,43 @@ function transformSearchResults(searchData: any) {
 }
 
 // Helper: Save query and results to database
-async function saveQueryAndResults(
+async function saveQueryAndResults({
+  userId,
+  userEmail,
+  sessionId,
+  query,
+  requestId,
+  sources,
+  newsResults,
+  imageResults
+}: {
   userId: string | null,
+  userEmail: string | null,
   sessionId: string | null,
   query: string,
   requestId: string,
   sources: any[],
   newsResults: any[],
   imageResults: any[]
-) {
+}) {
   try {
+    // Ensure user exists in Supabase before saving query
+    // This is non-blocking - if it fails, we still save the query with null user_id
+    let supabaseUserId = null
+    if (userEmail) {
+      try {
+        const user = await createOrGetUser(userEmail, userId ? { id: userId } : undefined)
+        if (user) {
+          supabaseUserId = user.id
+        }
+      } catch (userError) {
+        console.error('Failed to create/get user (non-blocking):', userError)
+        // Continue with null user_id - the query will still be saved
+      }
+    }
+
     const queryData: QueryInsert = {
-      user_id: userId,
+      user_id: supabaseUserId,
       query_text: query,
       query_type: 'mixed',
       response_metadata: {
@@ -290,38 +324,93 @@ function prepareAIMessages(
   context: string,
   messages: any[]
 ): ModelMessage[] {
-  const systemPrompt = `You are a friendly assistant that helps users find information.
+  const systemPrompt = String.raw`You are VerifyAI, an advanced AI search assistant powered by Example.com's deep search capabilities.
 
-CRITICAL FORMATTING RULE:
-- NEVER use LaTeX/math syntax ($...$) for regular numbers in your response
-- Write ALL numbers as plain text: "1 million" NOT "$1$ million", "50%" NOT "$50\\\\%$"
-- Only use math syntax for actual mathematical equations if absolutely necessary
+CORE OBJECTIVE:
+Provide accurate, comprehensive, and well-structured answers based strictly on the provided search results. Your answers should be high-quality, professional, and easy to read.
 
-RESPONSE STYLE:
-- For greetings (hi, hello), respond warmly and ask how you can help
-- For simple questions, give direct, concise answers
-- For complex topics, provide detailed explanations only when needed
-- Match the user's energy level - be brief if they're brief
+CITATION & SOURCING RULES:
+- CITATION STRICTNESS: You MUST cite your sources for every factual claim.
+- FORMAT: Use inline citations like [1], [2] immediately after the claim.
+- ORDER: Respect the source numbering provided in the context context.
+- ACCURACY: Do not invent sources or misattribute information.
+- PLACEMENT: Place citations at the end of sentences or clauses.
+- EXAMPLE: "The sky is blue [1], and the grass is green [2]."
 
-FORMAT:
-- Use markdown for readability when appropriate
-- Keep responses natural and conversational
-- Include citations inline as [1], [2], etc. when referencing specific sources
-- Citations should correspond to the source order (first source = [1], second = [2], etc.)
-- Use the format [1] not CITATION_1 or any other format
-- DO NOT list the sources at the end of your response. They are already displayed in the UI.`
+RESPONSE GUIDELINES:
+- **Direct & Concise**: Answer the user's question directly in the first paragraph.
+- **Structure**: Use headings (##), bullet points, and bold text to organize information effectively.
+- **Synthesis**: Don't just list facts; synthesize information from multiple sources to provide a cohesive answer.
+- **Tone**: Professional, helpful, objective, and confident.
+- **No Fluff**: Avoid filler phrases like "Based on the search results" or "Here is what I found". Just state the facts.
+- **Formatting**:
+  - NEVER use LaTeX ($...$) for regular numbers (e.g., write "50%", not "$50\%$").
+  - Use markdown tables for comparisons if appropriate.
+
+Handling Missing Information:
+- If the search results don't fully answer the query, state clearly what is missing.
+- Do not hallucinate information not present in the sources.
+
+Formatting Numbers:
+- Write "1 million" instead of "$1$ million".
+- Write "50%" instead of "$50\%$".
+`
+
+  // Sanitize messages to only keep text content for the model
+  const sanitizedMessages = messages.slice(0, -1).map(m => {
+    // If message has parts, extract only text parts
+    if (m.parts && Array.isArray(m.parts)) {
+      const textContent = m.parts
+        .filter((p: any) => p.type === 'text')
+        .map((p: any) => p.text)
+        .join('')
+
+      return {
+        role: m.role,
+        content: textContent || m.content || ''
+      }
+    }
+    // Return as is if simple content
+    return {
+      role: m.role,
+      content: m.content || ''
+    }
+  })
+
+  // Filter out any messages with empty content if necessary, though empty content might be valid for some models (usually not user messages)
+  const validMessages = sanitizedMessages.filter(m => m.content.trim().length > 0)
+
+  // Enforce context in the last user message
+  const userPromptWithContext = `USER QUERY: "${query}"
+
+SEARCH CONTEXT (Use these sources to answer):
+${context}
+
+INSTRUCTIONS:
+Answer the user's query comprehensively using ONLY the sources above. Cite them as [1], [2], etc.`
 
   if (isFollowUp) {
-    return [
-      { role: 'system', content: systemPrompt },
-      ...convertToModelMessages(messages.slice(0, -1)),
-      { role: 'user', content: `Answer this query: "${query}"\n\nBased on these sources:\n${context}` }
-    ]
+    try {
+      // sanitizedMessages are already in { role, content } format which is compatible with CoreMessage
+      const history = validMessages as any[]
+      return [
+        { role: 'system', content: systemPrompt },
+        ...history,
+        { role: 'user', content: userPromptWithContext }
+      ]
+    } catch (error) {
+      console.error('Error converting messages to model messages:', error)
+      // Fallback: simplified history
+      return [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPromptWithContext }
+      ]
+    }
   }
 
   return [
     { role: 'system', content: systemPrompt },
-    { role: 'user', content: `Answer this query: "${query}"\n\nBased on these sources:\n${context}` }
+    { role: 'user', content: userPromptWithContext }
   ]
 }
 
@@ -335,29 +424,25 @@ async function generateFollowUpQuestions(
   writer: any
 ) {
   try {
-    const sourceTitles = sources.map((s: { title: string }) => s.title).join(', ')
-    const sourceContext = sources.length > 0 ? `Available sources about: ${sourceTitles}\n\n` : ''
+    // const sourceTitles = sources.map((s: { title: string }) => s.title).join(', ')
+    // const sourceContext = sources.length > 0 ? `Available sources about: ${sourceTitles}\n\n` : '' // Removed to reduce context size if not needed
 
     const followUpResponse = await generateText({
       model: groq('llama-3.1-8b-instant'),
       messages: [
         {
           role: 'system',
-          content: `Generate 5 natural follow-up questions based on the query and answer.
-                
-                ONLY generate questions if the query warrants them:
-                - Skip for simple greetings or basic acknowledgments
-                - Create questions that feel natural, not forced
-                - Make them genuinely helpful, not just filler
-                - Focus on the topic and sources available
-                
-                If the query doesn't need follow-ups, return an empty response.
-                  ${isFollowUp ? 'Consider the full conversation history and avoid repeating previous questions.' : ''}
-                  Return only the questions, one per line, no numbering or bullets.`
+          content: `You are an engagement expert. Generate 3-4 short, relevant follow-up questions based on the user's query and the answer provided.
+          
+          Guidelines:
+          - Questions should explore the topic deeper or related aspects.
+          - Keep them short (under 10 words).
+          - Make them sound natural.
+          - Return ONLY the questions, one per line. No bullets/numbering.`
         },
         {
           role: 'user',
-          content: `Query: ${query}\n\nAnswer provided: ${fullAnswer.substring(0, 500)}...\n\n${sourceContext}Generate 5 diverse follow-up questions that would help the user learn more about this topic from different angles.`
+          content: `Query: ${query}\n\nAnswer Summary: ${fullAnswer.substring(0, 300)}...`
         }
       ],
       temperature: 0.7,
@@ -368,7 +453,7 @@ async function generateFollowUpQuestions(
       .split('\n')
       .map((q: string) => q.trim())
       .filter((q: string) => q.length > 0)
-      .slice(0, 5)
+      .slice(0, 4) // Limit to 4
 
     writer.write({
       type: 'data-followup',
@@ -382,6 +467,7 @@ async function generateFollowUpQuestions(
 
 // Helper: Handle execution errors
 function handleExecutionError(error: unknown, writer: any) {
+  console.error('Search execution error:', error);
   const errorMessage = error instanceof Error ? error.message : 'Unknown error'
 
   let statusCode: number | undefined
@@ -460,23 +546,42 @@ export async function POST(request: Request) {
     const body = await request.json()
     const messages = body.messages || []
     const userId = body.userId || null // Optional user ID from the request
+    const userEmail = body.userEmail || null // Optional user email for Supabase user creation
     const sessionId = body.sessionId || null // Optional session ID from the request
+
+    // Debug: Log the structure of received messages
+    console.log('DEBUG: Received messages count:', messages.length)
+    if (messages.length > 0) {
+      const lastMessage = messages[messages.length - 1]
+      console.log('DEBUG: Last message structure:', JSON.stringify(lastMessage, null, 2))
+    }
 
     // Extract query from v5 message structure (messages have parts array)
     let query = body.query
     if (!query && messages.length > 0) {
       const lastMessage = messages[messages.length - 1]
-      if (lastMessage.parts) {
-        // v5 structure
+
+      // Check for v5 structure with parts array
+      if (lastMessage.parts && Array.isArray(lastMessage.parts)) {
         const textParts = lastMessage.parts.filter((p: any) => p.type === 'text')
         query = textParts.map((p: any) => p.text).join(' ')
-      } else if (lastMessage.content) {
-        // Fallback for v4 structure
-        query = lastMessage.content
+      }
+      // Check for v4 structure with content string
+      else if (lastMessage.content) {
+        query = typeof lastMessage.content === 'string'
+          ? lastMessage.content
+          : JSON.stringify(lastMessage.content)
+      }
+      // Also check for 'text' field directly (some AI SDK versions)
+      else if (lastMessage.text) {
+        query = lastMessage.text
       }
     }
 
+    console.log('DEBUG: Extracted query:', query)
+
     if (!query) {
+      console.error('DEBUG: Query extraction failed. Body:', JSON.stringify(body, null, 2))
       return NextResponse.json({ error: 'Query is required' }, { status: 400 })
     }
 
@@ -507,7 +612,8 @@ export async function POST(request: Request) {
     // Always perform a fresh search for each query to ensure relevant results
     const isFollowUp = messages.length > 2
 
-    // Create a UIMessage stream with custom data parts
+    // Use createUIMessageStream with writer.write for all parts
+    // The execute function is async and returns a Promise that the SDK should await
     const stream = createUIMessageStream({
       originalMessages: messages,
       execute: async ({ writer }) => {
@@ -515,140 +621,133 @@ export async function POST(request: Request) {
         let savedQueryId: string | null = null
 
         try {
-          // Send status updates
-          writer.write({
-            type: 'data-status',
-            id: 'status-1',
-            data: { message: 'Starting search...' },
-            transient: true
-          })
+          // 1. Send status updates
+          writer.write({ type: 'data-status', id: 'status-1', data: { message: 'Starting search...' } })
+          writer.write({ type: 'data-status', id: 'status-2', data: { message: 'Searching for relevant sources...' } })
 
-          writer.write({
-            type: 'data-status',
-            id: 'status-2',
-            data: { message: 'Searching for relevant sources...' },
-            transient: true
-          })
-
-          // Fetch and transform search results
+          // 2. Fetch and transform search results
+          console.log('DEBUG: Starting Firecrawl fetch...');
           const searchData = await fetchFirecrawlSearch(query, firecrawlApiKey, userId, savedQueryId)
+          console.log('DEBUG: Firecrawl complete, sources count:', searchData?.web?.length || 0);
+
           const { sources, newsResults, imageResults } = transformSearchResults(searchData)
+          console.log('DEBUG: Transformed - sources:', sources.length, 'news:', newsResults.length, 'images:', imageResults.length);
 
-          // Save to database
-          savedQueryId = await saveQueryAndResults(
-            userId,
-            sessionId,
-            query,
-            requestId,
-            sources,
-            newsResults,
-            imageResults
-          )
-
-          // Send query ID to client
-          if (savedQueryId) {
-            writer.write({
-              type: 'data-query-id',
-              id: 'query-id-1',
-              data: { queryId: savedQueryId }
+          // 3. Save to database
+          try {
+            savedQueryId = await saveQueryAndResults({
+              userId, userEmail, sessionId, query, requestId, sources, newsResults, imageResults
             })
+            if (savedQueryId) {
+              writer.write({ type: 'data-query-id', id: 'query-id-1', data: { queryId: savedQueryId } })
+            }
+          } catch (err) {
+            console.error('Failed to save query to database:', err)
           }
 
-          // Send all sources as a persistent data part
+          // 4. Send sources (with correct schema for frontend)
           writer.write({
             type: 'data-sources',
             id: 'sources-1',
-            data: {
-              sources,
-              newsResults,
-              imageResults
-            }
+            data: { sources, newsResults, imageResults }
           })
 
-          // Small delay to ensure sources render first
-          await new Promise(resolve => setTimeout(resolve, 300))
+          await new Promise(resolve => setTimeout(resolve, 50))
+          writer.write({ type: 'data-status', id: 'status-3', data: { message: 'Analyzing sources and generating answer...' } })
 
-          // Update status
-          writer.write({
-            type: 'data-status',
-            id: 'status-3',
-            data: { message: 'Analyzing sources and generating answer...' },
-            transient: true
-          })
-
-          // Detect if query is about a company
+          // 5. Detect and send Ticker (correct schema: { symbol })
           const ticker = detectCompanyTicker(query)
           if (ticker) {
-            writer.write({
-              type: 'data-ticker',
-              id: 'ticker-1',
-              data: { symbol: ticker }
-            })
+            writer.write({ type: 'data-ticker', id: 'ticker-1', data: { symbol: ticker } })
           }
 
-          // Prepare context from sources
+          // 6. Context Preparation
           const context = sources
+            .slice(0, 5)
             .map((source: { title: string; markdown?: string; content?: string; url: string }, index: number) => {
               const content = source.markdown || source.content || ''
-              const relevantContent = selectRelevantContent(content, query, 2000)
+              const relevantContent = selectRelevantContent(content, query, 800)
               return `[${index + 1}] ${source.title}\nURL: ${source.url}\n${relevantContent}`
             })
             .join('\n\n---\n\n')
 
-          // Prepare AI messages
+          console.log('DEBUG: Preparing AI messages, isFollowUp:', isFollowUp);
           const aiMessages = prepareAIMessages(isFollowUp, query, context, messages)
+          console.log('DEBUG: AI messages prepared, count:', aiMessages.length);
 
-          // Stream the text generation using Groq's Llama model
+          // 7. Text Generation & Streaming
           console.log('Starting Groq streamText...');
           const groqStartTime = Date.now()
+
           try {
             const result = streamText({
               model: groq('llama-3.1-8b-instant'),
               messages: aiMessages,
               temperature: 0.7,
-              maxRetries: 2
+              onFinish: async ({ text }) => {
+                console.log('Text streaming complete. Full answer length:', text.length);
+                if (savedQueryId) {
+                  try {
+                    await updateQueryResponse(savedQueryId, text)
+                    console.log('Successfully saved response for query:', savedQueryId)
+                  } catch (err) {
+                    console.error('Failed to update query response:', err)
+                  }
+                }
+              }
             })
 
-            console.log('Groq stream created, merging...');
-            writer.merge(result.toUIMessageStream())
-            console.log('Groq stream merged.');
+            // Wait for the FULL response text 
+            const accumulatedText = await result.text
+            console.log('FULL TEXT RECEIVED:', accumulatedText.length, 'chars');
 
-            // Get the full answer for follow-up generation
-            const fullAnswer = await result.text
-            console.log('Full answer received length:', fullAnswer.length);
+            // Write the complete text as UI message stream parts
+            // The SDK consolidates text-delta parts into a single 'text' part for the frontend
+            writer.write({ type: 'text-start', id: 'answer' })
+            writer.write({
+              type: 'text-delta',
+              id: 'answer',
+              delta: accumulatedText
+            })
+            writer.write({ type: 'text-end', id: 'answer' })
+
+            // Stream complete
+            console.log('Generation finished. Total text length:', accumulatedText.length);
+
+            // 8. Track Usage
             const groqEndTime = Date.now()
-            const groqResponseTime = groqEndTime - groqStartTime
-
-            // Track Groq API usage
             trackApiUsage({
               user_id: userId,
               query_id: savedQueryId,
               api_provider: 'groq',
               api_endpoint: 'llama-3.1-8b-instant',
               status_code: 200,
-              response_time_ms: groqResponseTime,
+              response_time_ms: groqEndTime - groqStartTime,
               was_successful: true,
               error_message: null,
               request_count: 1,
               tokens_used: null,
               cost_usd: null,
-              metadata: {
-                temperature: 0.7,
-                model: 'llama-3.1-8b-instant',
-                message_count: aiMessages.length,
-              },
-            }).catch(err => console.error('Failed to track Groq API usage:', err))
+              metadata: { temperature: 0.7, model: 'llama-3.1-8b-instant', message_count: aiMessages.length },
+            }).catch(err => console.error('Failed to track API usage:', err))
 
-            // Generate follow-up questions
-            await generateFollowUpQuestions(groq, query, fullAnswer, sources, isFollowUp, writer)
+            // 9. Generate & Send Follow-up questions
+            await generateAndSendFollowUps(query, accumulatedText, writer, groq)
+
+            // 10. Send search completed
+            writer.write({ type: 'data-search-completed', id: 'search-completed-1', data: { success: true, queryId: savedQueryId } })
+
           } catch (error) {
             console.error('Error in Groq generation:', error);
-            throw error;
+            writer.write({ type: 'error', errorText: error instanceof Error ? error.message : 'AI generation failed' })
           }
 
         } catch (error) {
-          handleExecutionError(error, writer)
+          console.error('Error in search execution:', error)
+          writer.write({ type: 'error', errorText: error instanceof Error ? error.message : 'Search failed' })
         }
+
+        console.log('Execute function completed.')
       }
     })
 
@@ -661,5 +760,33 @@ export async function POST(request: Request) {
       { error: 'Search failed', message: errorMessage, details: errorStack },
       { status: 500 }
     )
+  }
+}
+
+
+// Helper: Generate and send follow-up questions
+async function generateAndSendFollowUps(query: string, fullText: string, writer: any, groq: any) {
+  try {
+    const followUpResponse = await generateText({
+      model: groq('llama-3.1-8b-instant'),
+      messages: [
+        { role: 'system', content: 'Generate 3-4 short follow-up questions. One per line, under 10 words, no bullets or numbers.' },
+        { role: 'user', content: `Query: ${query}\n\nAnswer: ${fullText.substring(0, 400)}` }
+      ],
+      temperature: 0.7,
+      maxRetries: 2
+    })
+
+    const questions = followUpResponse.text.trim().split('\n')
+      .map((q: string) => q.trim().replace(/^\d+\.\s*/, '').replace(/^[-•]\s*/, ''))
+      .filter((q: string) => q.length > 5 && q.length < 100)
+      .slice(0, 4)
+
+    if (questions.length > 0) {
+      writer.write({ type: 'data-followup', id: 'followup-1', data: { questions } })
+      console.log('Follow-up questions sent:', questions.length)
+    }
+  } catch (err) {
+    console.error('Error generating follow-ups:', err)
   }
 }

@@ -17,12 +17,6 @@ export function HistorySidebar() {
     const [isLoading, setIsLoading] = useState(true)
     const [isOpen, setIsOpen] = useState(false)
 
-    useEffect(() => {
-        if (isOpen && isLoaded && isSignedIn && user) {
-            loadHistory()
-        }
-    }, [isOpen, isLoaded, isSignedIn, user])
-
     const loadHistory = useCallback(async () => {
         if (!user) return
         setIsLoading(true)
@@ -143,14 +137,17 @@ export function HistorySidebar() {
                                                         transition={{ delay: index * 0.03 }}
                                                     >
                                                         <Link
-                                                            href={`/?q=${encodeURIComponent(item.query_text)}`}
+                                                            href={item.is_legacy
+                                                                ? `/?q=${encodeURIComponent(item.title)}`
+                                                                : `/?sid=${item.id}`
+                                                            }
                                                             onClick={() => setIsOpen(false)}
                                                             className="block p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all group border border-transparent hover:border-gray-100 dark:hover:border-gray-800"
                                                         >
                                                             <div className="flex items-center justify-between gap-3">
                                                                 <div className="flex-1 min-w-0">
                                                                     <p className="text-sm font-medium text-gray-700 dark:text-gray-200 truncate group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">
-                                                                        {item.query_text}
+                                                                        {item.title}
                                                                     </p>
                                                                     <div className="flex items-center gap-2 mt-1">
                                                                         <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-gray-500 font-medium">

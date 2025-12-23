@@ -30,7 +30,7 @@ export function MarkdownRenderer({ content, sources }: MarkdownRendererProps) {
           return (
             <sup
               key={`citation-${match[1]}-${index}`}
-              className="citation text-orange-600 cursor-pointer hover:text-orange-700 text-[0.65rem] ml-0.5"
+              className="citation text-orange-600 dark:text-orange-400 cursor-pointer hover:text-orange-700 dark:hover:text-orange-300 hover:underline text-xs font-medium ml-0.5 select-none"
               data-citation={match[1]}
             >
               [{match[1]}]
@@ -40,7 +40,7 @@ export function MarkdownRenderer({ content, sources }: MarkdownRendererProps) {
         return part
       })
     }
-    
+
     if (Array.isArray(children)) {
       return children.map((child, i) => {
         if (typeof child === 'string') {
@@ -49,7 +49,7 @@ export function MarkdownRenderer({ content, sources }: MarkdownRendererProps) {
         return child
       })
     }
-    
+
     return children
   }, [])
 

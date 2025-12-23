@@ -40,6 +40,7 @@ interface ModernChatInterfaceProps {
   readonly followUpQuestions: string[]
   readonly searchStatus: string
   readonly isLoading: boolean
+  readonly isSubmitting?: boolean
   readonly input: string
   readonly handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
   readonly handleSubmit: (e: React.FormEvent<HTMLFormElement>) => void
@@ -47,16 +48,26 @@ interface ModernChatInterfaceProps {
 }
 
 // Helper function to extract text content from UIMessage
+// AI SDK's useChat hook consolidates stream deltas into 'text' parts automatically
 function getMessageContent(message: UIMessage): string {
   if (!message.parts) {
-    console.log('Message has no parts:', message);
+    // Fallback for legacy message format
+    console.log('[DEBUG] Message has no parts, using content:', (message as any).content?.length || 0);
     return (message as any).content || '';
   }
-  const text = message.parts
-    .filter((part: any) => part.type === 'text')
-    .map((part: any) => part.text)
-    .join('')
-  console.log('Extracted text for message:', message.id, text);
+
+  // Debug: Log all parts with their types and content lengths
+  console.log('[DEBUG] Message parts count:', message.parts.length);
+  message.parts.forEach((part: any, idx: number) => {
+    console.log(`[DEBUG] Part ${idx}: type=${part.type}, textLen=${part.text?.length || 0}`);
+  });
+
+  // Per AI SDK docs: parts have type 'text' with 'text' property
+  // The hook handles delta consolidation internally
+  const textParts = message.parts.filter((part: any) => part.type === 'text');
+  const text = textParts.map((part: any) => part.text || '').join('');
+
+  console.log('[DEBUG] Extracted text parts:', textParts.length, 'total chars:', text.length);
   return text;
 }
 
@@ -87,15 +98,16 @@ export function ModernChatInterface({
   followUpQuestions,
   searchStatus,
   isLoading,
+  isSubmitting,
   input,
   handleInputChange,
-
   handleSubmit,
   messageData
 }: ModernChatInterfaceProps) {
   console.log('ModernChatInterface messages:', messages);
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -214,7 +226,7 @@ export function ModernChatInterface({
         className="flex-1 overflow-y-auto pb-48 scroll-smooth"
         onScroll={handleScroll}
       >
-        <div className="max-w-4xl mx-auto py-8">
+        <div className="max-w-4xl mx-auto py-8 px-4 space-y-6">
           <AnimatePresence>
             {messages.length === 0 && (
               <motion.div
@@ -288,7 +300,7 @@ export function ModernChatInterface({
                       </div>
                     ) : (
                       <div className="bg-white dark:bg-gray-800/50 rounded-3xl rounded-bl-sm px-6 py-4 shadow-sm border border-gray-100 dark:border-gray-700/50">
-                        <div className="prose prose-gray max-w-none dark:prose-invert prose-sm">
+                        <div className="prose prose-gray max-w-none dark:prose-invert prose-p:leading-relaxed prose-p:mb-4 prose-li:my-1 prose-headings:mt-4 prose-headings:mb-2">
                           <MarkdownRenderer
                             content={getMessageContent(message)}
                             sources={sources}
@@ -335,31 +347,39 @@ export function ModernChatInterface({
               ))}
           </AnimatePresence>
 
-          {/* Loading States */}
-          {isLoading && messages.at(-1)?.role === 'user' && (
-            <motion.div
-              className="flex gap-4 justify-start"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4 }}
-            >
-              <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-orange-600 rounded-full flex items-center justify-center flex-shrink-0 shadow-md">
-                <Bot className="w-5 h-5 text-white" />
-              </div>
-              <div className="max-w-3xl">
-                {searchStatus ? (
-                  <SearchLoadingSteps currentStep={searchStatus} />
-                ) : (
-                  <TypingIndicator />
-                )}
-              </div>
-            </motion.div>
-          )}
+          {/* Loading States - Show when submitting or loading with empty/no assistant response */}
+          {(isSubmitting || (isLoading && (() => {
+            // Check if we should show loading indicator
+            const lastMsg = messages.at(-1)
+            if (!lastMsg) return true // No messages yet
+            if (lastMsg.role === 'user') return true // Last message is from user
+            // Last message is assistant - show loading if it has no content yet
+            const content = getMessageContent(lastMsg)
+            return content.trim().length === 0
+          })())) && (
+              <motion.div
+                className="flex gap-4 justify-start"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4 }}
+              >
+                <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-orange-600 rounded-full flex items-center justify-center flex-shrink-0 shadow-md">
+                  <Bot className="w-5 h-5 text-white" />
+                </div>
+                <div className="max-w-3xl">
+                  {searchStatus ? (
+                    <SearchLoadingSteps currentStep={searchStatus} />
+                  ) : (
+                    <TypingIndicator />
+                  )}
+                </div>
+              </motion.div>
+            )}
 
           {/* Sources Display */}
           {sources.length > 0 && !isLoading && (
             <motion.div
-              className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700"
+              className="mt-6 bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4 }}
@@ -407,7 +427,7 @@ export function ModernChatInterface({
           {/* Image Results Display */}
           {imageResults.length > 0 && !isLoading && (
             <motion.div
-              className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700"
+              className="mt-4 bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.1 }}
@@ -419,7 +439,7 @@ export function ModernChatInterface({
           {/* News Results Display */}
           {newsResults.length > 0 && !isLoading && (
             <motion.div
-              className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700"
+              className="mt-4 bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-gray-700"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.2 }}
@@ -521,8 +541,20 @@ export function ModernChatInterface({
 
               <div className="flex items-center justify-between p-2 bg-gray-50/50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-700/50">
                 <div className="flex items-center gap-1">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) {
+                        toast.info(`File "${file.name}" selected. Multimodal support coming soon!`)
+                      }
+                    }}
+                  />
                   <button
                     type="button"
+                    onClick={() => fileInputRef.current?.click()}
                     className="group/btn p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2 text-gray-500 dark:text-gray-400"
                   >
                     <Paperclip className="w-4 h-4 group-hover/btn:text-orange-500 transition-colors" />
@@ -532,13 +564,6 @@ export function ModernChatInterface({
                   </button>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 dark:text-gray-400 transition-colors border border-dashed border-gray-300 dark:border-gray-600 hover:border-orange-400 dark:hover:border-orange-500 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 flex items-center gap-1.5"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Project
-                  </button>
                   <button
                     type="submit"
                     disabled={!input.trim() || isLoading}
