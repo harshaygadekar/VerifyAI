@@ -142,6 +142,33 @@ export interface SavedSearch {
 }
 
 // ============================================================================
+// Chat History Types (Conversations & Messages)
+// ============================================================================
+
+export type MessageRole = 'user' | 'assistant' | 'system'
+
+export interface Conversation {
+  id: string
+  user_id: string
+  title: string
+  created_at: string
+  updated_at: string
+  first_query_id: string | null
+  metadata: Record<string, any>
+}
+
+export interface Message {
+  id: string
+  conversation_id: string
+  role: MessageRole
+  content: string
+  parts: any[] | null // AI SDK UIMessage parts
+  metadata: Record<string, any>
+  query_id: string | null
+  created_at: string
+}
+
+// ============================================================================
 // Insert Types (for creating new records)
 // ============================================================================
 
@@ -182,6 +209,17 @@ export type SavedSearchInsert = Omit<SavedSearch, 'id' | 'created_at' | 'updated
   updated_at?: string
 }
 
+export type ConversationInsert = Omit<Conversation, 'id' | 'created_at' | 'updated_at'> & {
+  id?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export type MessageInsert = Omit<Message, 'id' | 'created_at'> & {
+  id?: string
+  created_at?: string
+}
+
 // ============================================================================
 // Update Types (for updating existing records)
 // ============================================================================
@@ -193,6 +231,8 @@ export type UserSessionUpdate = Partial<Omit<UserSession, 'id' | 'session_start'
 export type QueryFeedbackUpdate = Partial<Omit<QueryFeedback, 'id' | 'created_at'>>
 export type ApiUsageUpdate = Partial<Omit<ApiUsage, 'id' | 'created_at'>>
 export type SavedSearchUpdate = Partial<Omit<SavedSearch, 'id' | 'created_at'>>
+export type ConversationUpdate = Partial<Omit<Conversation, 'id' | 'created_at'>>
+export type MessageUpdate = Partial<Omit<Message, 'id' | 'created_at'>>
 
 // ============================================================================
 // View Types (for analytics views)

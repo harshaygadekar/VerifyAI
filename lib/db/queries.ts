@@ -24,6 +24,9 @@ import type {
   ApiUsageInsert,
   QueryType,
   ResultType,
+  Conversation,
+  Message,
+  MessageInsert,
 } from './types'
 
 // ============================================================================
@@ -802,6 +805,305 @@ export async function getTodayStats(): Promise<{
     return stats
   } catch (error) {
     console.error('Unexpected error fetching today stats:', error)
+    return null
+  }
+}
+
+// ============================================================================
+// Conversation Operations
+// ============================================================================
+
+/**
+ * Create a new conversation
+ *
+ * @param userId - User ID (Supabase UUID)
+ * @param title - Optional initial title (defaults to "New conversation")
+ * @returns The created conversation or null on error
+ */
+export async function createConversation(
+  userId: string,
+  title?: string
+): Promise<Conversation | null> {
+  try {
+    const supabase = createAdminClient()
+
+    const { data, error } = await supabase
+      .from('conversations')
+      .insert({
+        user_id: userId,
+        title: title || 'New conversation',
+      } as never)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error creating conversation:', error)
+      return null
+    }
+
+    return data
+  } catch (error) {
+    console.error('Unexpected error creating conversation:', error)
+    return null
+  }
+}
+
+/**
+ * Get all conversations for a user (sorted by updated_at DESC)
+ *
+ * @param userId - User ID (Supabase UUID)
+ * @param limit - Maximum number of conversations to return
+ * @returns Array of conversations
+ */
+export async function getConversations(
+  userId: string,
+  limit: number = 100
+): Promise<Conversation[]> {
+  try {
+    const supabase = createAdminClient()
+
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .limit(limit)
+
+    if (error) {
+      console.error('Error fetching conversations:', error)
+      return []
+    }
+
+    return data || []
+  } catch (error) {
+    console.error('Unexpected error fetching conversations:', error)
+    return []
+  }
+}
+
+/**
+ * Get a single conversation by ID
+ *
+ * @param conversationId - Conversation ID
+ * @returns Conversation or null
+ */
+export async function getConversation(
+  conversationId: string
+): Promise<Conversation | null> {
+  try {
+    const supabase = createAdminClient()
+
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('id', conversationId)
+      .single()
+
+    if (error) {
+      console.error('Error fetching conversation:', error)
+      return null
+    }
+
+    return data
+  } catch (error) {
+    console.error('Unexpected error fetching conversation:', error)
+    return null
+  }
+}
+
+/**
+ * Update conversation title (for auto-title after first exchange)
+ *
+ * @param conversationId - Conversation ID
+ * @param title - New title
+ * @returns Success status
+ */
+export async function updateConversationTitle(
+  conversationId: string,
+  title: string
+): Promise<boolean> {
+  try {
+    const supabase = createAdminClient()
+
+    const { error } = await supabase
+      .from('conversations')
+      .update({ title } as never)
+      .eq('id', conversationId)
+
+    if (error) {
+      console.error('Error updating conversation title:', error)
+      return false
+    }
+
+    return true
+  } catch (error) {
+    console.error('Unexpected error updating conversation title:', error)
+    return false
+  }
+}
+
+/**
+ * Touch conversation (update updated_at to now)
+ * Call this after each new message to keep sidebar sorted correctly
+ *
+ * @param conversationId - Conversation ID
+ * @returns Success status
+ */
+export async function touchConversation(
+  conversationId: string
+): Promise<boolean> {
+  try {
+    const supabase = createAdminClient()
+
+    const { error } = await supabase
+      .from('conversations')
+      .update({ updated_at: new Date().toISOString() } as never)
+      .eq('id', conversationId)
+
+    if (error) {
+      console.error('Error touching conversation:', error)
+      return false
+    }
+
+    return true
+  } catch (error) {
+    console.error('Unexpected error touching conversation:', error)
+    return false
+  }
+}
+
+/**
+ * Delete a conversation and all its messages
+ *
+ * @param conversationId - Conversation ID
+ * @returns Success status
+ */
+export async function deleteConversation(
+  conversationId: string
+): Promise<boolean> {
+  try {
+    const supabase = createAdminClient()
+
+    const { error } = await supabase
+      .from('conversations')
+      .delete()
+      .eq('id', conversationId)
+
+    if (error) {
+      console.error('Error deleting conversation:', error)
+      return false
+    }
+
+    return true
+  } catch (error) {
+    console.error('Unexpected error deleting conversation:', error)
+    return false
+  }
+}
+
+// ============================================================================
+// Message Operations
+// ============================================================================
+
+/**
+ * Save a message to a conversation
+ *
+ * @param messageData - Message data to insert
+ * @returns The created message or null on error
+ */
+export async function saveMessage(
+  messageData: MessageInsert
+): Promise<Message | null> {
+  try {
+    const supabase = createAdminClient()
+
+    const { data, error } = await supabase
+      .from('messages')
+      .insert(messageData as never)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error saving message:', error)
+      return null
+    }
+
+    // Touch the conversation to update its updated_at
+    await touchConversation(messageData.conversation_id)
+
+    return data
+  } catch (error) {
+    console.error('Unexpected error saving message:', error)
+    return null
+  }
+}
+
+/**
+ * Get all messages for a conversation (sorted by created_at ASC)
+ *
+ * @param conversationId - Conversation ID
+ * @returns Array of messages
+ */
+export async function getMessages(
+  conversationId: string
+): Promise<Message[]> {
+  try {
+    const supabase = createAdminClient()
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.error('Error fetching messages:', error)
+      return []
+    }
+
+    return data || []
+  } catch (error) {
+    console.error('Unexpected error fetching messages:', error)
+    return []
+  }
+}
+
+/**
+ * Get conversation with all its messages
+ *
+ * @param conversationId - Conversation ID
+ * @returns Conversation with messages or null
+ */
+export async function getConversationWithMessages(
+  conversationId: string
+): Promise<(Conversation & { messages: Message[] }) | null> {
+  try {
+    const supabase = createAdminClient()
+
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('*, messages(*)')
+      .eq('id', conversationId)
+      .single()
+
+    if (error) {
+      console.error('Error fetching conversation with messages:', error)
+      return null
+    }
+
+    // Cast data to expected type with messages
+    const result = data as unknown as (Conversation & { messages: Message[] })
+
+    // Sort messages by created_at
+    if (result?.messages) {
+      result.messages.sort((a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      )
+    }
+
+    return result
+  } catch (error) {
+    console.error('Unexpected error fetching conversation with messages:', error)
     return null
   }
 }

@@ -119,26 +119,43 @@ export function ModernChatInterface({
 
   const { user } = useUser()
 
-  const handleBookmark = async (index: number) => {
+  const handleBookmark = async (message: UIMessage) => {
     if (!user) {
       toast.error('Please sign in to bookmark')
       return
     }
 
-    const data = messageData?.get(index)
+    // Calculate the assistant message index (1-based count of assistant messages up to this one)
+    const assistantIndex = messages
+      .filter(m => m.role === 'assistant')
+      .findIndex(m => m.id === message.id) + 1
+
+    const data = messageData?.get(assistantIndex)
     const queryId = data?.queryId
 
     if (!queryId) {
       toast.error('Cannot bookmark: Missing query ID')
+      console.log('DEBUG: handleBookmark - assistantIndex:', assistantIndex, 'messageData keys:', Array.from(messageData?.keys() || []))
       return
     }
 
     // Find the preceding user message for the query text
-    const userMessage = messages[index - 1]
+    const messageIndex = messages.findIndex(m => m.id === message.id)
+    const userMessage = messageIndex > 0 ? messages[messageIndex - 1] : null
     const queryText = userMessage?.role === 'user' ? getMessageContent(userMessage) : 'Saved Search'
 
+    // Get the full AI response content
+    const aiResponseContent = getMessageContent(message)
+
     try {
-      const { isBookmarked } = await toggleBookmark(user.id, queryId, queryText.slice(0, 50), queryText)
+      // Save: title = user query, query_text = user query, ai_response in metadata
+      const { isBookmarked } = await toggleBookmark(
+        user.id,
+        queryId,
+        queryText.slice(0, 100),  // title
+        queryText,                 // query_text
+        aiResponseContent          // ai_response (stored in metadata)
+      )
       toast.success(isBookmarked ? 'Bookmark added' : 'Bookmark removed')
     } catch (error) {
       console.error('Bookmark error:', error)
@@ -293,14 +310,14 @@ export function ModernChatInterface({
                     </div>
                   )}
 
-                  <div className={`max-w-3xl ${message.role === 'user' ? 'order-first' : ''}`}>
+                  <div className={`max-w-3xl min-w-0 ${message.role === 'user' ? 'order-first' : ''}`}>
                     {message.role === 'user' ? (
                       <div className="bg-orange-600 text-white rounded-3xl rounded-br-sm px-6 py-4 shadow-md max-w-[85%] ml-auto">
-                        <p className="text-base leading-relaxed">{getMessageContent(message)}</p>
+                        <p className="text-base leading-relaxed break-words">{getMessageContent(message)}</p>
                       </div>
                     ) : (
-                      <div className="bg-white dark:bg-gray-800/50 rounded-3xl rounded-bl-sm px-6 py-4 shadow-sm border border-gray-100 dark:border-gray-700/50">
-                        <div className="prose prose-gray max-w-none dark:prose-invert prose-p:leading-relaxed prose-p:mb-4 prose-li:my-1 prose-headings:mt-4 prose-headings:mb-2">
+                      <div className="bg-white dark:bg-gray-800/50 rounded-3xl rounded-bl-sm px-6 py-4 shadow-sm border border-gray-100 dark:border-gray-700/50 overflow-hidden">
+                        <div className="prose prose-gray max-w-none dark:prose-invert prose-p:leading-relaxed prose-p:mb-4 prose-li:my-1 prose-headings:mt-4 prose-headings:mb-2 break-words overflow-wrap-anywhere">
                           <MarkdownRenderer
                             content={getMessageContent(message)}
                             sources={sources}
@@ -327,7 +344,7 @@ export function ModernChatInterface({
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleBookmark(index)}
+                            onClick={() => handleBookmark(message)}
                             className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                           >
                             <Bookmark className="w-4 h-4" />

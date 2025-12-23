@@ -62,7 +62,8 @@ export function HistorySidebar() {
         lastWeek.setDate(lastWeek.getDate() - 7)
 
         for (const item of history) {
-            const date = new Date(item.created_at)
+            // Use updated_at for grouping (shows latest activity), fallback to created_at
+            const date = new Date(item.updated_at || item.created_at)
             const itemDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
 
             if (itemDate.getTime() === today.getTime()) {
@@ -138,8 +139,8 @@ export function HistorySidebar() {
                                                     >
                                                         <Link
                                                             href={item.is_legacy
-                                                                ? `/?q=${encodeURIComponent(item.title)}`
-                                                                : `/?sid=${item.id}`
+                                                                ? `/?sid=${item.id}`
+                                                                : `/?c=${item.id}`
                                                             }
                                                             onClick={() => setIsOpen(false)}
                                                             className="block p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all group border border-transparent hover:border-gray-100 dark:hover:border-gray-800"
@@ -150,11 +151,13 @@ export function HistorySidebar() {
                                                                         {item.title}
                                                                     </p>
                                                                     <div className="flex items-center gap-2 mt-1">
-                                                                        <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-gray-500 font-medium">
-                                                                            {item.query_type || 'WEB'}
-                                                                        </span>
+                                                                        {item.query_type && (
+                                                                            <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-gray-500 font-medium">
+                                                                                {item.query_type}
+                                                                            </span>
+                                                                        )}
                                                                         <span className="text-xs text-gray-400">
-                                                                            {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                                            {new Date(item.updated_at || item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                                                         </span>
                                                                     </div>
                                                                 </div>

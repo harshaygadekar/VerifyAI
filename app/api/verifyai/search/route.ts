@@ -4,7 +4,17 @@ import { streamText, generateText, createUIMessageStream, createUIMessageStreamR
 import type { ModelMessage } from 'ai'
 import { detectCompanyTicker } from '@/lib/company-ticker-map'
 import { selectRelevantContent } from '@/lib/content-selection'
-import { saveQuery, saveSearchResults, trackApiUsage, createOrGetUser, updateQueryResponse } from '@/lib/db/queries'
+import {
+  saveQuery,
+  saveSearchResults,
+  trackApiUsage,
+  createOrGetUser,
+  updateQueryResponse,
+  createConversation,
+  saveMessage,
+  getConversation,
+  updateConversationTitle
+} from '@/lib/db/queries'
 import type { QueryInsert, SearchResultInsert } from '@/lib/db/types'
 import { validateSearchQuery } from '@/lib/validations'
 import { rateLimit, getClientIdentifier } from '@/lib/rate-limit'
@@ -732,9 +742,78 @@ export async function POST(request: Request) {
             }).catch(err => console.error('Failed to track API usage:', err))
 
             // 9. Generate & Send Follow-up questions
-            await generateAndSendFollowUps(query, accumulatedText, writer, groq)
+            const generatedFollowUps = await generateAndSendFollowUps(query, accumulatedText, writer, groq)
 
-            // 10. Send search completed
+            // 10. Save to Conversations/Messages tables (new chat history system)
+            try {
+              // Get Supabase user ID (from email) - this is what getChatHistory uses
+              let supabaseUserId: string | null = null
+              if (userEmail) {
+                const supabaseUser = await createOrGetUser(userEmail)
+                supabaseUserId = supabaseUser?.id || null
+              }
+
+              // Get or create conversation
+              let conversationId = sessionId
+              let isNewConversation = false
+              const existingConversation = await getConversation(sessionId)
+
+              if (!existingConversation && supabaseUserId) {
+                // Create new conversation (first message in this session)
+                const newConv = await createConversation(supabaseUserId, query.slice(0, 50))
+                if (newConv) {
+                  conversationId = newConv.id
+                  isNewConversation = true
+                  console.log('Created new conversation:', conversationId)
+
+                  // Stream the new conversation ID to client so it can update URL
+                  writer.write({
+                    type: 'data-conversation-id',
+                    id: 'conv-id-1',
+                    data: { conversationId }
+                  })
+                }
+              }
+
+              if (conversationId && supabaseUserId) {
+                // Save user message
+                await saveMessage({
+                  conversation_id: conversationId,
+                  role: 'user',
+                  content: query,
+                  parts: [{ type: 'text', text: query }],
+                  metadata: {},
+                  query_id: savedQueryId
+                })
+
+                // Save assistant message with metadata
+                await saveMessage({
+                  conversation_id: conversationId,
+                  role: 'assistant',
+                  content: accumulatedText,
+                  parts: [{ type: 'text', text: accumulatedText }],
+                  metadata: {
+                    sources: sources.slice(0, 5), // Store just metadata, not full content
+                    followUpQuestions: generatedFollowUps || [],
+                    queryId: savedQueryId
+                  },
+                  query_id: savedQueryId
+                })
+
+                console.log('Messages saved to conversation:', conversationId)
+
+                // Generate auto-title for new conversations (after first exchange)
+                if (isNewConversation) {
+                  generateAutoTitle(conversationId, query, groq).catch((err: Error) =>
+                    console.error('Failed to generate auto-title:', err)
+                  )
+                }
+              }
+            } catch (err) {
+              console.error('Failed to save messages to conversation:', err)
+            }
+
+            // 11. Send search completed
             writer.write({ type: 'data-search-completed', id: 'search-completed-1', data: { success: true, queryId: savedQueryId } })
 
           } catch (error) {
@@ -765,7 +844,7 @@ export async function POST(request: Request) {
 
 
 // Helper: Generate and send follow-up questions
-async function generateAndSendFollowUps(query: string, fullText: string, writer: any, groq: any) {
+async function generateAndSendFollowUps(query: string, fullText: string, writer: any, groq: any): Promise<string[]> {
   try {
     const followUpResponse = await generateText({
       model: groq('llama-3.1-8b-instant'),
@@ -786,7 +865,40 @@ async function generateAndSendFollowUps(query: string, fullText: string, writer:
       writer.write({ type: 'data-followup', id: 'followup-1', data: { questions } })
       console.log('Follow-up questions sent:', questions.length)
     }
+
+    return questions
   } catch (err) {
     console.error('Error generating follow-ups:', err)
+    return []
+  }
+}
+
+/**
+ * Generate auto-title for new conversations (like ChatGPT/Gemini)
+ * Runs in background after first exchange
+ */
+async function generateAutoTitle(conversationId: string, userQuery: string, groq: any): Promise<void> {
+  try {
+    const titleResponse = await generateText({
+      model: groq('llama-3.1-8b-instant'),
+      messages: [
+        {
+          role: 'system',
+          content: 'Generate a 3-5 word title summarizing this request. No punctuation, no quotes, just the title.'
+        },
+        { role: 'user', content: userQuery }
+      ],
+      temperature: 0.5,
+      maxRetries: 2
+    })
+
+    const title = titleResponse.text.trim().slice(0, 50)
+
+    if (title && title.length > 2) {
+      await updateConversationTitle(conversationId, title)
+      console.log('Auto-generated title:', title)
+    }
+  } catch (err) {
+    console.error('Error generating auto-title:', err)
   }
 }

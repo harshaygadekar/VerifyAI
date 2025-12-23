@@ -8,7 +8,7 @@ import { SearchComponent } from './search'
 import { SearchResult, NewsResult, ImageResult } from './types'
 import { Button } from '@/components/ui/button'
 import { useState, useEffect, useRef, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { getSessionMessages } from '@/lib/actions'
 import {
   Dialog,
@@ -57,15 +57,21 @@ function VerifyAIPageContent() {
 
   // Initialize sessionId on mount or from URL
   const searchParams = useSearchParams()
-  const sessionIdFromUrl = searchParams.get('sid')
+  const conversationIdFromUrl = searchParams.get('c')
+  const sessionIdFromUrl = searchParams.get('sid') // Legacy
 
   // Get URL parameters
   const queryFromUrl = searchParams.get('q')
 
   useEffect(() => {
-    if (sessionIdFromUrl) {
+    if (conversationIdFromUrl) {
+      // New conversation format
+      setSessionId(conversationIdFromUrl)
+      setShowLanding(false)
+    } else if (sessionIdFromUrl) {
+      // Legacy session format
       setSessionId(sessionIdFromUrl)
-      setShowLanding(false) // Always skip landing when loading a session
+      setShowLanding(false)
     } else if (queryFromUrl) {
       // Legacy URL with ?q=... - auto-submit the query
       setShowLanding(false)
@@ -75,7 +81,7 @@ function VerifyAIPageContent() {
     } else if (!sessionId) {
       setSessionId(crypto.randomUUID())
     }
-  }, [sessionIdFromUrl, sessionId, queryFromUrl])
+  }, [conversationIdFromUrl, sessionIdFromUrl, sessionId, queryFromUrl])
 
   // Use refs to get current values in prepareSendMessagesRequest
   const sessionIdRef = useRef(sessionId)
@@ -104,23 +110,25 @@ function VerifyAIPageContent() {
   })
 
   useEffect(() => {
-    if (sessionIdFromUrl && user?.id) {
-      loadSessionData(sessionIdFromUrl)
+    // Load session data from URL (conversation or legacy session)
+    const idToLoad = conversationIdFromUrl || sessionIdFromUrl
+    if (idToLoad && user?.id) {
+      loadSessionData(idToLoad, !!conversationIdFromUrl)
     }
-  }, [sessionIdFromUrl, user?.id])
+  }, [conversationIdFromUrl, sessionIdFromUrl, user?.id])
 
   // Auto-submit query from URL parameter (legacy links)
   const hasAutoSubmitted = useRef(false)
   useEffect(() => {
-    if (queryFromUrl && hasApiKey && !hasAutoSubmitted.current && !sessionIdFromUrl) {
+    if (queryFromUrl && hasApiKey && !hasAutoSubmitted.current && !sessionIdFromUrl && !conversationIdFromUrl) {
       hasAutoSubmitted.current = true
       setHasSearched(true)
       setIsSubmitting(true)
       sendMessage({ text: queryFromUrl })
     }
-  }, [queryFromUrl, hasApiKey, sessionIdFromUrl, sendMessage])
+  }, [queryFromUrl, hasApiKey, sessionIdFromUrl, conversationIdFromUrl, sendMessage])
 
-  const loadSessionData = async (sid: string) => {
+  const loadSessionData = async (sid: string, isConversation: boolean = false) => {
     try {
       const result = await getSessionMessages(sid)
       if (result && (result as any).messages) {
@@ -244,6 +252,16 @@ function VerifyAIPageContent() {
         if (part.type === 'data-search-completed' && part.data) {
           // Dispatch custom event to refresh history sidebar
           globalThis.dispatchEvent(new CustomEvent('verifyai:search-completed'))
+        }
+
+        // Handle new conversation ID from server - update URL to enable bookmarking
+        if (part.type === 'data-conversation-id' && part.data) {
+          const data = part.data as { conversationId?: string }
+          if (data.conversationId && data.conversationId !== sessionId) {
+            setSessionId(data.conversationId)
+            // Update URL without refresh to enable bookmarking and history
+            window.history.replaceState({}, '', `/?c=${data.conversationId}`)
+          }
         }
       }
 
@@ -380,6 +398,11 @@ function VerifyAIPageContent() {
   const showSearchInterface = !showLanding && !isChatActive
 
   const handleNewChat = () => {
+    // Generate new session ID for new conversation
+    const newSessionId = crypto.randomUUID()
+    setSessionId(newSessionId)
+
+    // Reset all state
     setHasSearched(false)
     setSources([])
     setNewsResults([])
@@ -388,8 +411,17 @@ function VerifyAIPageContent() {
     setCurrentTicker(null)
     setInput('')
     setMessageData(new Map())
+    setSearchStatus('')
+    currentMessageIndex.current = 0
+
+    // Clear messages from chat hook
+    setMessages([])
+
+    // Update URL to clean state (remove any conversation ID)
+    window.history.replaceState({}, '', '/')
+
+    // Don't show landing, go straight to search interface
     setShowLanding(false)
-    // Reset messages would need to be handled by the chat hook
   }
 
   const handleGetStarted = () => {
