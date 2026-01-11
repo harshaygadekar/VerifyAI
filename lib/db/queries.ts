@@ -27,7 +27,13 @@ import type {
   Conversation,
   Message,
   MessageInsert,
+  ResearchSession,
+  ResearchSessionInsert,
+  ResearchSessionUpdate,
+  ResearchQueryResult,
+  ResearchQueryResultInsert,
 } from './types'
+
 
 // ============================================================================
 // Query Operations
@@ -1107,3 +1113,129 @@ export async function getConversationWithMessages(
     return null
   }
 }
+
+// ============================================================================
+// Research Session Operations
+// ============================================================================
+
+/**
+ * Create a new research session
+ *
+ * @param sessionData - Research session data to insert
+ * @returns The created research session or null on error
+ */
+export async function createResearchSession(
+  sessionData: ResearchSessionInsert
+): Promise<ResearchSession | null> {
+  try {
+    const supabase = createAdminClient()
+
+    const { data, error } = await supabase
+      .from('research_sessions')
+      .insert(sessionData as never)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error creating research session:', error)
+      return null
+    }
+
+    return data
+  } catch (error) {
+    console.error('Unexpected error creating research session:', error)
+    return null
+  }
+}
+
+/**
+ * Update a research session
+ *
+ * @param sessionId - Research session ID
+ * @param updateData - Data to update
+ * @returns Success status
+ */
+export async function updateResearchSession(
+  sessionId: string,
+  updateData: ResearchSessionUpdate
+): Promise<boolean> {
+  try {
+    const supabase = createAdminClient()
+
+    const { error } = await supabase
+      .from('research_sessions')
+      .update(updateData as never)
+      .eq('id', sessionId)
+
+    if (error) {
+      console.error('Error updating research session:', error)
+      return false
+    }
+
+    return true
+  } catch (error) {
+    console.error('Unexpected error updating research session:', error)
+    return false
+  }
+}
+
+/**
+ * Get a research session by ID
+ *
+ * @param sessionId - Research session ID
+ * @returns Research session or null
+ */
+export async function getResearchSession(
+  sessionId: string
+): Promise<ResearchSession | null> {
+  try {
+    const supabase = createAdminClient()
+
+    const { data, error } = await supabase
+      .from('research_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .single()
+
+    if (error) {
+      console.error('Error fetching research session:', error)
+      return null
+    }
+
+    return data
+  } catch (error) {
+    console.error('Unexpected error fetching research session:', error)
+    return null
+  }
+}
+
+/**
+ * Add a query result to a research session
+ *
+ * @param resultData - Research query result data to insert
+ * @returns The created result or null on error
+ */
+export async function addResearchQueryResult(
+  resultData: ResearchQueryResultInsert
+): Promise<ResearchQueryResult | null> {
+  try {
+    const supabase = createAdminClient()
+
+    const { data, error } = await supabase
+      .from('research_query_results')
+      .insert(resultData as never)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error adding research query result:', error)
+      return null
+    }
+
+    return data
+  } catch (error) {
+    console.error('Unexpected error adding research query result:', error)
+    return null
+  }
+}
+

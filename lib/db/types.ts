@@ -169,6 +169,43 @@ export interface Message {
 }
 
 // ============================================================================
+// Deep Research Types
+// ============================================================================
+
+export type ResearchMode = 'quick' | 'deep' | 'exhaustive'
+export type SynthesisStatus = 'pending' | 'in_progress' | 'completed' | 'failed'
+
+export interface ResearchSession {
+  id: string
+  user_id: string | null
+  conversation_id: string | null
+  original_query: string
+  research_mode: ResearchMode
+  additional_queries_count: number
+  expanded_queries: string[]
+  total_sources_found: number
+  synthesis_status: SynthesisStatus
+  final_report: string | null
+  total_cost_usd: number | null
+  total_tokens_used: number | null
+  created_at: string
+  completed_at: string | null
+  metadata: Record<string, any>
+}
+
+export interface ResearchQueryResult {
+  id: string
+  research_session_id: string
+  query_id: string | null
+  query_text: string
+  is_original: boolean
+  query_order: number
+  sources_count: number
+  created_at: string
+}
+
+
+// ============================================================================
 // Insert Types (for creating new records)
 // ============================================================================
 
@@ -220,6 +257,18 @@ export type MessageInsert = Omit<Message, 'id' | 'created_at'> & {
   created_at?: string
 }
 
+export type ResearchSessionInsert = Omit<ResearchSession, 'id' | 'created_at' | 'completed_at'> & {
+  id?: string
+  created_at?: string
+  completed_at?: string
+}
+
+export type ResearchQueryResultInsert = Omit<ResearchQueryResult, 'id' | 'created_at'> & {
+  id?: string
+  created_at?: string
+}
+
+
 // ============================================================================
 // Update Types (for updating existing records)
 // ============================================================================
@@ -233,6 +282,9 @@ export type ApiUsageUpdate = Partial<Omit<ApiUsage, 'id' | 'created_at'>>
 export type SavedSearchUpdate = Partial<Omit<SavedSearch, 'id' | 'created_at'>>
 export type ConversationUpdate = Partial<Omit<Conversation, 'id' | 'created_at'>>
 export type MessageUpdate = Partial<Omit<Message, 'id' | 'created_at'>>
+export type ResearchSessionUpdate = Partial<Omit<ResearchSession, 'id' | 'created_at'>>
+export type ResearchQueryResultUpdate = Partial<Omit<ResearchQueryResult, 'id' | 'created_at'>>
+
 
 // ============================================================================
 // View Types (for analytics views)

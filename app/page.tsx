@@ -1,14 +1,14 @@
 'use client'
 
 import { useChat } from '@ai-sdk/react'
-import { useUser } from '@clerk/nextjs'
 import { DefaultChatTransport } from 'ai'
+import { useUser } from '@clerk/nextjs'
 import { motion } from 'framer-motion'
 import { SearchComponent } from './search'
 import { SearchResult, NewsResult, ImageResult } from './types'
 import { Button } from '@/components/ui/button'
 import { useState, useEffect, useRef, Suspense } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { getSessionMessages } from '@/lib/actions'
 import {
   Dialog,
@@ -32,6 +32,25 @@ interface MessageData {
   queryId?: string
 }
 
+
+// ... existing imports ...
+
+// Research Mode Types
+interface ResearchProgress {
+  step: 'expanding' | 'searching' | 'synthesizing' | 'complete'
+  current?: number
+  total?: number
+  currentQuery?: string
+  percentage: number
+}
+
+interface QueryGroup {
+  query: string
+  isOriginal: boolean
+  sources: { url: string; title: string; favicon?: string }[]
+  count: number
+}
+
 // Main content component that uses useSearchParams
 function VerifyAIPageContent() {
   const [sources, setSources] = useState<SearchResult[]>([])
@@ -50,6 +69,14 @@ function VerifyAIPageContent() {
   const [pendingQuery, setPendingQuery] = useState<string>('')
   const [input, setInput] = useState<string>('')
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
+
+  // Research Mode State
+  const [isResearchMode, setIsResearchMode] = useState<boolean>(false)
+  const [researchQueryCount, setResearchQueryCount] = useState<number>(3)
+  const [includeSubpages, setIncludeSubpages] = useState<boolean>(false)
+  const [forceLiveCrawl, setForceLiveCrawl] = useState<boolean>(false)
+  const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null)
+  const [queriesExplored, setQueriesExplored] = useState<QueryGroup[]>([])
 
   const [showLanding, setShowLanding] = useState<boolean>(true)
   const [sessionId, setSessionId] = useState<string>('')
@@ -88,6 +115,10 @@ function VerifyAIPageContent() {
   const userIdRef = useRef(user?.id)
   const userEmailRef = useRef(user?.emailAddresses?.[0]?.emailAddress)
   const firecrawlApiKeyRef = useRef(firecrawlApiKey)
+  const isResearchModeRef = useRef(isResearchMode)
+  const researchQueryCountRef = useRef(researchQueryCount)
+  const includeSubpagesRef = useRef(includeSubpages)
+  const forceLiveCrawlRef = useRef(forceLiveCrawl)
 
   // Keep refs in sync
   useEffect(() => {
@@ -95,19 +126,37 @@ function VerifyAIPageContent() {
     userIdRef.current = user?.id
     userEmailRef.current = user?.emailAddresses?.[0]?.emailAddress
     firecrawlApiKeyRef.current = firecrawlApiKey
-  }, [sessionId, user?.id, user?.emailAddresses, firecrawlApiKey])
+    isResearchModeRef.current = isResearchMode
+    researchQueryCountRef.current = researchQueryCount
+    includeSubpagesRef.current = includeSubpages
+    forceLiveCrawlRef.current = forceLiveCrawl
+  }, [sessionId, user?.id, user?.emailAddresses, firecrawlApiKey, isResearchMode, researchQueryCount, includeSubpages, forceLiveCrawl])
 
   const { messages, sendMessage, status, setMessages } = (useChat as any)({
+    // Use DefaultChatTransport for AI SDK v5 with custom API endpoint
     transport: new DefaultChatTransport({
       api: '/api/verifyai/search',
-      body: {
-        firecrawlApiKey: firecrawlApiKeyRef.current || undefined,
-        userId: userIdRef.current,
-        userEmail: userEmailRef.current,
-        sessionId: sessionIdRef.current
+      // Inject dynamic values via body in prepareSendMessagesRequest
+      prepareSendMessagesRequest: (options: any) => {
+        return {
+          ...options,
+          body: {
+            ...(options.body || {}),
+            messages: options.messages, // Include messages in body for API
+            firecrawlApiKey: firecrawlApiKeyRef.current,
+            userId: userIdRef.current,
+            userEmail: userEmailRef.current,
+            sessionId: sessionIdRef.current,
+            isResearchMode: isResearchModeRef.current,
+            researchQueryCount: researchQueryCountRef.current,
+            includeSubpages: includeSubpagesRef.current,
+            forceLiveCrawl: forceLiveCrawlRef.current
+          }
+        }
       }
     })
   })
+
 
   useEffect(() => {
     // Load session data from URL (conversation or legacy session)
@@ -246,6 +295,31 @@ function VerifyAIPageContent() {
         if (part.type === 'data-query-id' && part.data) {
           const data = part.data as { queryId?: string }
           latestQueryId = data.queryId ?? null
+        }
+
+        // Handle expanded queries for research mode
+        if (part.type === 'data-expanded-queries' && part.data) {
+          const data = part.data as { original?: string; expanded?: string[] }
+          // You could store these to display in UI if needed
+          console.log('[Research] Original:', data.original, 'Expanded:', data.expanded)
+        }
+
+        // Handle research progress updates
+        if (part.type === 'data-research-progress' && part.data) {
+          const data = part.data as ResearchProgress
+          setResearchProgress(data)
+          // Auto-clear when complete
+          if (data.step === 'complete') {
+            setTimeout(() => setResearchProgress(null), 2000)
+          }
+        }
+
+        // Handle queries explored for grouped display
+        if (part.type === 'data-queries-explored' && part.data) {
+          const data = part.data as { queriesExplored?: QueryGroup[] }
+          if (data.queriesExplored) {
+            setQueriesExplored(data.queriesExplored)
+          }
         }
 
         // Handle search completion - dispatch event for history sidebar refresh
@@ -473,12 +547,23 @@ function VerifyAIPageContent() {
           {showSearchInterface ? (
             <div className="px-4 sm:px-6 lg:px-8">
               <div className="max-w-7xl mx-auto">
-                <SearchComponent
-                  handleSubmit={handleSearch}
-                  input={input}
-                  handleInputChange={(e) => setInput(e.target.value)}
-                  isLoading={status === 'streaming'}
-                />
+                <div className="relative">
+                  <SearchComponent
+                    handleSubmit={handleSearch}
+                    input={input}
+                    handleInputChange={(e) => setInput(e.target.value)}
+                    isLoading={status === 'streaming'}
+                    isResearchMode={isResearchMode}
+                    setIsResearchMode={setIsResearchMode}
+                    researchQueryCount={researchQueryCount}
+                    setResearchQueryCount={setResearchQueryCount}
+                    includeSubpages={includeSubpages}
+                    setIncludeSubpages={setIncludeSubpages}
+                    forceLiveCrawl={forceLiveCrawl}
+                    setForceLiveCrawl={setForceLiveCrawl}
+                  />
+                </div>
+
               </div>
             </div>
           ) : (
@@ -495,6 +580,16 @@ function VerifyAIPageContent() {
               handleInputChange={(e) => setInput(e.target.value)}
               handleSubmit={handleChatSubmit}
               messageData={messageData}
+              isResearchMode={isResearchMode}
+              setIsResearchMode={setIsResearchMode}
+              researchQueryCount={researchQueryCount}
+              setResearchQueryCount={setResearchQueryCount}
+              includeSubpages={includeSubpages}
+              setIncludeSubpages={setIncludeSubpages}
+              forceLiveCrawl={forceLiveCrawl}
+              setForceLiveCrawl={setForceLiveCrawl}
+              researchProgress={researchProgress}
+              queriesExplored={queriesExplored}
             />
           )}
         </div>

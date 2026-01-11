@@ -554,6 +554,21 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json()
+
+    // Check if research mode is enabled - forward to research handler
+    if (body.isResearchMode) {
+      console.log('[Search Route] Research mode detected, forwarding to research handler')
+      // Import and call the research handler
+      const { POST: researchPOST } = await import('../research/route')
+      // Create a new request with the same body for the research handler
+      const researchRequest = new Request(request.url, {
+        method: 'POST',
+        headers: request.headers,
+        body: JSON.stringify(body)
+      })
+      return researchPOST(researchRequest)
+    }
+
     const messages = body.messages || []
     const userId = body.userId || null // Optional user ID from the request
     const userEmail = body.userEmail || null // Optional user email for Supabase user creation

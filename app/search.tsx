@@ -6,11 +6,21 @@ import { Search, Sparkles, Zap, Globe, Image as ImageIcon } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { InlineLoading } from '@/components/loading-animation'
 
+import { ResearchModeToggle } from '@/components/research-mode-toggle'
+
 interface SearchComponentProps {
   handleSubmit: (e: React.FormEvent<HTMLFormElement>) => void
   input: string
   handleInputChange: (e: React.ChangeEvent<HTMLInputElement> | React.ChangeEvent<HTMLTextAreaElement>) => void
   isLoading: boolean
+  isResearchMode: boolean
+  setIsResearchMode: (enabled: boolean) => void
+  researchQueryCount: number
+  setResearchQueryCount: (count: number) => void
+  includeSubpages: boolean
+  setIncludeSubpages: (enabled: boolean) => void
+  forceLiveCrawl: boolean
+  setForceLiveCrawl: (enabled: boolean) => void
 }
 
 const suggestedQueries = [
@@ -29,7 +39,20 @@ const features = [
   { icon: Zap, text: "Real-time Data", color: "text-orange-500" }
 ]
 
-export function SearchComponent({ handleSubmit, input, handleInputChange, isLoading }: SearchComponentProps) {
+export function SearchComponent({
+  handleSubmit,
+  input,
+  handleInputChange,
+  isLoading,
+  isResearchMode,
+  setIsResearchMode,
+  researchQueryCount,
+  setResearchQueryCount,
+  includeSubpages,
+  setIncludeSubpages,
+  forceLiveCrawl,
+  setForceLiveCrawl
+}: SearchComponentProps) {
   const [isFocused, setIsFocused] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -40,6 +63,20 @@ export function SearchComponent({ handleSubmit, input, handleInputChange, isLoad
 
   return (
     <div className="max-w-4xl mx-auto pt-12 space-y-8">
+      {/* Search Header with Toggle */}
+      <div className="flex justify-end px-2">
+        <ResearchModeToggle
+          isResearchMode={isResearchMode}
+          onToggle={setIsResearchMode}
+          queryCount={researchQueryCount}
+          onQueryCountChange={setResearchQueryCount}
+          includeSubpages={includeSubpages}
+          onIncludeSubpagesChange={setIncludeSubpages}
+          forceLiveCrawl={forceLiveCrawl}
+          onForceLiveCrawlChange={setForceLiveCrawl}
+        />
+      </div>
+
       {/* Main Search Form */}
       <motion.form
         onSubmit={handleSubmit}

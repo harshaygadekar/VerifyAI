@@ -4,7 +4,7 @@ import { useRef, useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Loader2, User, Bot, Copy, Sparkles, FileText, Plus, ArrowUp,
-  Paperclip, Globe, Image as ImageIcon, Search, Check, Bookmark
+  Paperclip, Globe, Image as ImageIcon, Search, Check, Bookmark, Download
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -21,6 +21,10 @@ import { NewsResults } from '../app/news-results'
 import Image from 'next/image'
 import { useAutoResizeTextarea } from '@/hooks/use-auto-resize-textarea'
 import { cn } from '@/lib/utils'
+import { ResearchModeToggle } from './research-mode-toggle'
+import { ResearchProgressIndicator } from './research-progress-indicator'
+import { QueriesExploredSection } from './queries-explored-section'
+import { exportResearchAsPDF } from '@/lib/pdf-export'
 
 interface MessageData {
   sources: SearchResult[]
@@ -45,6 +49,27 @@ interface ModernChatInterfaceProps {
   readonly handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
   readonly handleSubmit: (e: React.FormEvent<HTMLFormElement>) => void
   readonly messageData?: Map<number, MessageData>
+  readonly isResearchMode?: boolean
+  readonly setIsResearchMode?: (enabled: boolean) => void
+  readonly researchQueryCount?: number
+  readonly setResearchQueryCount?: (count: number) => void
+  readonly includeSubpages?: boolean
+  readonly setIncludeSubpages?: (enabled: boolean) => void
+  readonly forceLiveCrawl?: boolean
+  readonly setForceLiveCrawl?: (enabled: boolean) => void
+  readonly researchProgress?: {
+    step: 'expanding' | 'searching' | 'synthesizing' | 'complete'
+    current?: number
+    total?: number
+    currentQuery?: string
+    percentage: number
+  } | null
+  readonly queriesExplored?: {
+    query: string
+    isOriginal: boolean
+    sources: { url: string; title: string; favicon?: string }[]
+    count: number
+  }[]
 }
 
 // Helper function to extract text content from UIMessage
@@ -102,7 +127,17 @@ export function ModernChatInterface({
   input,
   handleInputChange,
   handleSubmit,
-  messageData
+  messageData,
+  isResearchMode = false,
+  setIsResearchMode = () => { },
+  researchQueryCount = 3,
+  setResearchQueryCount = () => { },
+  includeSubpages = false,
+  setIncludeSubpages = () => { },
+  forceLiveCrawl = false,
+  setForceLiveCrawl = () => { },
+  researchProgress = null,
+  queriesExplored = []
 }: ModernChatInterfaceProps) {
   console.log('ModernChatInterface messages:', messages);
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -404,6 +439,43 @@ export function ModernChatInterface({
               <div className="flex items-center gap-2 mb-4">
                 <FileText className="w-5 h-5 text-orange-500" />
                 <h3 className="font-semibold text-gray-900 dark:text-white">Sources</h3>
+
+                {/* Export PDF Button - Only in Research Mode */}
+                {isResearchMode && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        toast.info('Generating PDF...')
+                        // Get the last assistant message content
+                        const assistantMessages = messages.filter(m => m.role === 'assistant')
+                        const lastAssistant = assistantMessages[assistantMessages.length - 1]
+                        const content = lastAssistant ? getMessageContent(lastAssistant) : ''
+
+                        // Get the original query from the last user message
+                        const userMessages = messages.filter(m => m.role === 'user')
+                        const lastUser = userMessages[userMessages.length - 1]
+                        const query = lastUser ? getMessageContent(lastUser) : ''
+
+                        await exportResearchAsPDF({
+                          title: 'Deep Research Report',
+                          query,
+                          content,
+                          sources: sources.map(s => ({ url: s.url, title: s.title })),
+                          queriesExplored: queriesExplored?.map(q => ({ query: q.query, count: q.count })) || []
+                        })
+                        toast.success('PDF downloaded!')
+                      } catch (error) {
+                        console.error('PDF export failed:', error)
+                        toast.error('Failed to generate PDF')
+                      }
+                    }}
+                    className="ml-auto flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 hover:bg-purple-100 dark:hover:bg-purple-800/40 rounded-lg transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Export PDF
+                  </button>
+                )}
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {sources.slice(0, 6).map((source, index) => (
@@ -438,6 +510,30 @@ export function ModernChatInterface({
                   </motion.a>
                 ))}
               </div>
+            </motion.div>
+          )}
+
+          {/* Research Progress Indicator */}
+          {isResearchMode && researchProgress && (
+            <motion.div
+              className="mt-4"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <ResearchProgressIndicator progress={researchProgress} />
+            </motion.div>
+          )}
+
+          {/* Queries Explored Section (Deep Research Mode) */}
+          {isResearchMode && queriesExplored && queriesExplored.length > 0 && !isLoading && (
+            <motion.div
+              className="mt-4"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.1 }}
+            >
+              <QueriesExploredSection queriesExplored={queriesExplored} />
             </motion.div>
           )}
 
@@ -579,6 +675,20 @@ export function ModernChatInterface({
                       Attach
                     </span>
                   </button>
+
+                  <div className="h-4 w-[1px] bg-gray-200 dark:bg-gray-700 mx-1" />
+
+                  <ResearchModeToggle
+                    isResearchMode={isResearchMode}
+                    onToggle={setIsResearchMode}
+                    queryCount={researchQueryCount}
+                    onQueryCountChange={setResearchQueryCount}
+                    includeSubpages={includeSubpages}
+                    onIncludeSubpagesChange={setIncludeSubpages}
+                    forceLiveCrawl={forceLiveCrawl}
+                    onForceLiveCrawlChange={setForceLiveCrawl}
+                    disabled={isLoading}
+                  />
                 </div>
                 <div className="flex items-center gap-2">
                   <button
